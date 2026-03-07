@@ -1,0 +1,35 @@
+flowchart TD
+  S([Start]) --> A["Client submits InputReport\n(POST + Idempotency-Key)"]
+  A --> B{"Idempotency-Key seen?"}
+  B -->|Yes| B1["Return previous response\n(same input_report_id)"]
+  B -->|No| C["Persist InputReport + Outbox record\n(single DB transaction)"]
+  C --> D["Publisher relays Outbox -> Event Bus"]
+  D --> E["Emit: input_report.created"]
+
+  E --> F["Coordination consumes event\n(Idempotent consumer checks event id)"]
+  F --> G["Write OutputReport + Outbox\n(single DB transaction)"]
+  G --> H["Emit: output_report.generated"]
+  G --> I["Write ServiceRequest + WorkOrder + Outbox\n(single DB transaction)"]
+  I --> J["Emit: service_request.created + work_order.created"]
+
+  J --> K{"External side-effect needed?"}
+  K -->|No| L["No integration request emitted"]
+  K -->|Yes| M["Emit: integration.requested\n(partition_key=work_order_id)"]
+  M --> N["Integration consumes request"]
+  N --> O["Call external system\n(retry with backoff + circuit breaker)"]
+  O --> P{"Success?"}
+  P -->|Yes| Q["Emit: integration.completed"]
+  P -->|No| R["Emit: integration.failed"]
+
+  %% Governance always-on
+  E -.-> GA["Governance consumes all events"]
+  H -.-> GA
+  J -.-> GA
+  M -.-> GA
+  Q -.-> GA
+  R -.-> GA
+  GA --> GB["Append audit record (immutable)"]
+  GA --> GC{"Policy check violated?"}
+  GC -->|No| GD["No action"]
+  GC -->|Yes| GE["Emit: policy.violation_detected"]
+  GE --> F

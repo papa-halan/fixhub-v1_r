@@ -1,0 +1,30 @@
+erDiagram
+  ORG ||--o{ USER : has
+  ORG ||--o{ LOCATION : has
+  LOCATION ||--o{ ASSET : hosts
+
+  USER ||--o{ INPUT_REPORT : submits
+  INPUT_REPORT ||--o{ ATTACHMENT : includes
+  INPUT_REPORT ||--|| OUTPUT_REPORT : generates
+
+  OUTPUT_REPORT ||--o{ SERVICE_REQUEST : recommends
+  SERVICE_REQUEST ||--o{ WORK_ORDER : becomes
+
+  WORK_ORDER }o--|| ASSET : concerns
+  WORK_ORDER }o--|| LOCATION : occurs_at
+  SERVICE_REQUEST }o--|| ASSET : concerns
+  SERVICE_REQUEST }o--|| LOCATION : occurs_at
+
+  WORK_ORDER ||--o{ WORK_ORDER_TASK : has
+  WORK_ORDER ||--o{ WORK_ORDER_ASSIGNMENT : assigns
+  USER ||--o{ WORK_ORDER_ASSIGNMENT : assignee
+
+  WORK_ORDER ||--o{ COMMENT : has
+  WORK_ORDER ||--o{ ATTACHMENT : has
+
+  SLA_POLICY ||--o{ SLA_INSTANCE : defines
+  WORK_ORDER ||--o{ SLA_INSTANCE : tracks
+
+  EVENT_LOG }o--|| ORG : scoped_to
+  EVENT_LOG }o--o| WORK_ORDER : relates_to
+  EVENT_LOG ||--o{ POLICY_FINDING : yields

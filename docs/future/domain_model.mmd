@@ -1,0 +1,49 @@
+flowchart LR
+  %% Process-aware domain model (events + authoritative writers)
+
+  subgraph Interface["Interface layer (context)"]
+    IR["InputReport"]
+    AT["Attachment"]
+    CM["Comment"]
+  end
+
+  subgraph Coordination["Coordination layer (authoritative workflow writer)"]
+    ORPT["OutputReport"]
+    SR["ServiceRequest"]
+    WO["WorkOrder"]
+  end
+
+  subgraph Integration["Integration layer (bridges side effects)"]
+    IRQ["Integration Request"]
+    IRR["Integration Result"]
+  end
+
+  subgraph Governance["Governance layer (audit + policy)"]
+    AUD["Audit Event Log"]
+    PF["Policy Finding"]
+  end
+
+  IR -->|"emit: input_report.created"| Coordination
+  IR --> AT
+  IR --> CM
+
+  Coordination -->|"emit: output_report.generated"| ORPT
+  ORPT -->|"emit: service_request.created"| SR
+  SR -->|"emit: work_order.created"| WO
+
+  WO -->|"emit: integration.requested (if needed)"| IRQ
+  IRQ -->|"consume"| Integration
+  Integration -->|"emit: integration.completed/failed"| IRR
+  IRR -->|"consume"| Coordination
+
+  %% Governance taps everything
+  IR -.->|"consume all events"| Governance
+  ORPT -.->|"consume all events"| Governance
+  SR -.->|"consume all events"| Governance
+  WO -.->|"consume all events"| Governance
+  IRQ -.->|"consume all events"| Governance
+  IRR -.->|"consume all events"| Governance
+
+  Governance --> AUD
+  Governance -->|"emit: policy.violation_detected (if any)"| PF
+  PF -->|"consume"| Coordination
