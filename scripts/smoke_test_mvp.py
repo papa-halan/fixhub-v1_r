@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from collections import Counter
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, select
 
 from app.core.database import session_scope
 from app.models import (
     AuditEntry,
     DomainEvent,
     EVENT_INTEGRATION_COMPLETED,
+    EVENT_INTEGRATION_FAILED,
     EVENT_INTEGRATION_REQUESTED,
     EVENT_MAINTENANCE_REQUEST_SUBMITTED,
     EVENT_WORK_ORDER_CREATED,
@@ -16,6 +17,7 @@ from app.models import (
     IntegrationJob,
     WorkOrderStatus,
 )
+from app.services.auth_service import login
 from app.services.maintenance_coordination import (
     MaintenanceCoordinationService,
     build_routing_key,
@@ -28,89 +30,194 @@ if __name__ == "__main__":
         seed = ensure_seed_data(session)
         workflow = MaintenanceCoordinationService(session)
 
-        maintenance_request = workflow.submit_maintenance_request(
+        resident = login(
+            session=session,
+            email="resident@uon.example",
+            password="resident-password",
+        )
+        staff = login(
+            session=session,
+            email="staff@uon.example",
+            password="staff-password",
+        )
+        contractor = login(
+            session=session,
+            email="contractor@uon.example",
+            password="contractor-password",
+        )
+
+        request_default = workflow.submit_maintenance_request(
             org_id=seed.org_id,
             unit_id=seed.unit_id,
-            resident_user_id=seed.resident_user_id,
+            resident_user_id=resident.user_id,
             category=seed.category,
             priority="normal",
             description="Kitchen tap is leaking.",
         )
-
-        work_order, integration_job = workflow.create_work_order_from_request(
-            request_id=maintenance_request.request_id,
-            actor_user_id=seed.resident_user_id,
-            connector="notify contractor",
+        request_override = workflow.submit_maintenance_request(
+            org_id=seed.org_id,
+            unit_id=seed.unit_id,
+            resident_user_id=resident.user_id,
+            category=seed.category,
+            priority="normal",
+            description="Bathroom tap is leaking.",
         )
 
-        workflow.transition_work_order_status(
-            work_order_id=work_order.work_order_id,
-            to_status=WorkOrderStatus.in_progress,
-            actor_user_id=seed.contractor_user_id,
+        unactioned = workflow.list_submitted_requests_without_work_order(
+            staff_user_id=staff.user_id,
+            org_id=seed.org_id,
         )
-        workflow.transition_work_order_status(
-            work_order_id=work_order.work_order_id,
-            to_status=WorkOrderStatus.completed,
-            actor_user_id=seed.contractor_user_id,
+        unactioned_ids = {request.request_id for request in unactioned}
+        assert request_default.request_id in unactioned_ids
+        assert request_override.request_id in unactioned_ids
+
+        work_order_default, integration_job_default = workflow.dispatch_request_to_work_order(
+            request_id=request_default.request_id,
+            staff_user_id=staff.user_id,
+            connector="notify_contractor",
+        )
+        assert work_order_default.contractor_user_id == seed.contractor_user_id
+
+        work_order_override, integration_job_override = workflow.dispatch_request_to_work_order(
+            request_id=request_override.request_id,
+            staff_user_id=staff.user_id,
+            contractor_user_id_override=seed.override_contractor_user_id,
+            connector="notify_contractor",
+        )
+        assert work_order_override.contractor_user_id == seed.override_contractor_user_id
+
+        contractor_orders = workflow.list_assigned_work_orders(
+            contractor_user_id=contractor.user_id,
+            statuses=[WorkOrderStatus.assigned],
+        )
+        assert any(
+            order.work_order_id == work_order_default.work_order_id for order in contractor_orders
         )
 
-        workflow.finalize_integration_job(
-            job_id=integration_job.job_id,
+        workflow.contractor_start_job(
+            work_order_id=work_order_default.work_order_id,
+            contractor_user_id=contractor.user_id,
+        )
+        completed_work_order, resident_notification_job = workflow.contractor_complete_job(
+            work_order_id=work_order_default.work_order_id,
+            contractor_user_id=contractor.user_id,
+            completion_note="Tap washer replaced and leak resolved.",
+            create_resident_notification_job=True,
+            connector="notify_resident",
+        )
+        assert completed_work_order.status == WorkOrderStatus.completed
+        assert completed_work_order.completed_at is not None
+        assert resident_notification_job is not None
+
+        workflow.record_integration_job_outcome(
+            job_id=integration_job_default.job_id,
             succeeded=True,
-            actor_user_id=seed.contractor_user_id,
+        )
+        workflow.record_integration_job_outcome(
+            job_id=resident_notification_job.job_id,
+            succeeded=False,
+            error_message="SMTP timeout",
         )
 
-        session.flush()
+        resident_status = workflow.get_resident_request_status(
+            resident_user_id=resident.user_id,
+            request_id=request_default.request_id,
+        )
+        assert resident_status.work_order is not None
+        assert resident_status.work_order.status == WorkOrderStatus.completed
 
+        subject_ids = [
+            request_default.request_id,
+            request_override.request_id,
+            work_order_default.work_order_id,
+            work_order_override.work_order_id,
+            integration_job_default.job_id,
+            integration_job_override.job_id,
+            resident_notification_job.job_id,
+        ]
         events = list(
             session.scalars(
                 select(DomainEvent)
-                .where(
-                    or_(
-                        DomainEvent.subject_id == maintenance_request.request_id,
-                        DomainEvent.subject_id == work_order.work_order_id,
-                        DomainEvent.subject_id == integration_job.job_id,
-                    )
-                )
+                .where(DomainEvent.subject_id.in_(subject_ids))
                 .order_by(DomainEvent.time.asc())
             )
         )
 
-        assert len(events) == 6, f"Expected 6 events, got {len(events)}"
+        assert len(events) == 11, f"Expected 11 events, got {len(events)}"
 
         type_counts = Counter(event.type for event in events)
-        assert type_counts[EVENT_MAINTENANCE_REQUEST_SUBMITTED] == 1
-        assert type_counts[EVENT_WORK_ORDER_CREATED] == 1
+        assert type_counts[EVENT_MAINTENANCE_REQUEST_SUBMITTED] == 2
+        assert type_counts[EVENT_WORK_ORDER_CREATED] == 2
         assert type_counts[EVENT_WORK_ORDER_STATUS_CHANGED] == 2
-        assert type_counts[EVENT_INTEGRATION_REQUESTED] == 1
+        assert type_counts[EVENT_INTEGRATION_REQUESTED] == 3
         assert type_counts[EVENT_INTEGRATION_COMPLETED] == 1
+        assert type_counts[EVENT_INTEGRATION_FAILED] == 1
 
         expected_routing_key = build_routing_key(seed.org_id, seed.residence_id, seed.category)
         for event in events:
             assert event.routing_key == expected_routing_key
             if event.type == EVENT_MAINTENANCE_REQUEST_SUBMITTED:
                 assert event.partition_key == str(seed.org_id)
+                assert event.actor_user_id == resident.user_id
+            elif event.type == EVENT_WORK_ORDER_CREATED:
+                assert event.partition_key == str(event.subject_id)
+                assert event.actor_user_id == staff.user_id
+            elif event.type == EVENT_WORK_ORDER_STATUS_CHANGED:
+                assert event.partition_key == str(event.subject_id)
+                assert event.subject_id == work_order_default.work_order_id
+                assert event.actor_user_id == contractor.user_id
+            elif event.subject_id in (
+                integration_job_default.job_id,
+                integration_job_override.job_id,
+            ):
+                assert event.partition_key in (
+                    str(work_order_default.work_order_id),
+                    str(work_order_override.work_order_id),
+                )
+                if event.type == EVENT_INTEGRATION_REQUESTED:
+                    assert event.actor_user_id == staff.user_id
+            elif event.subject_id == resident_notification_job.job_id:
+                assert event.partition_key == str(work_order_default.work_order_id)
+                if event.type == EVENT_INTEGRATION_REQUESTED:
+                    assert event.actor_user_id == contractor.user_id
             else:
-                assert event.partition_key == str(work_order.work_order_id)
+                assert event.partition_key == str(work_order_default.work_order_id)
 
         status_events = [
             event for event in events if event.type == EVENT_WORK_ORDER_STATUS_CHANGED
         ]
-        to_status_values = {str(event.data.get("to_status")) for event in status_events}
-        assert to_status_values == {"in_progress", "completed"}
+        assert {event.data.get("to") for event in status_events} == {
+            WorkOrderStatus.in_progress.value,
+            WorkOrderStatus.completed.value,
+        }
+        completed_event = next(
+            event
+            for event in status_events
+            if event.data.get("to") == WorkOrderStatus.completed.value
+        )
+        assert completed_event.data.get("completion_note") == "Tap washer replaced and leak resolved."
+        assert completed_event.actor_user_id == contractor.user_id
 
-        jobs = list(
-            session.scalars(
-                select(IntegrationJob).where(
-                    IntegrationJob.work_order_id == work_order.work_order_id
-                )
+        requested_events_by_subject = {
+            event.subject_id: event
+            for event in events
+            if event.type == EVENT_INTEGRATION_REQUESTED
+        }
+        jobs = {
+            job.job_id: job
+            for job in session.scalars(
+                select(IntegrationJob).where(IntegrationJob.job_id.in_(list(requested_events_by_subject)))
             )
-        )
-        assert len(jobs) == 1
-        created_event = next(
-            event for event in events if event.type == EVENT_WORK_ORDER_CREATED
-        )
-        assert jobs[0].event_id == created_event.event_id
+        }
+        assert jobs[integration_job_default.job_id].event_id == requested_events_by_subject[
+            integration_job_default.job_id
+        ].event_id
+        assert jobs[integration_job_override.job_id].event_id == requested_events_by_subject[
+            integration_job_override.job_id
+        ].event_id
+        assert jobs[resident_notification_job.job_id].event_id == requested_events_by_subject[
+            resident_notification_job.job_id
+        ].event_id
 
         audit_count = session.scalar(
             select(func.count(AuditEntry.audit_id)).where(
@@ -119,13 +226,10 @@ if __name__ == "__main__":
         )
         assert audit_count == len(events)
 
-        assert work_order.status == WorkOrderStatus.completed
-        assert work_order.completed_at is not None
-
     print("Smoke test passed:")
-    print("  maintenance_request created")
-    print("  work_order created via routing_rules")
-    print("  status transitioned to in_progress then completed")
-    print("  domain_events partition_key/routing_key assertions passed")
-    print("  integration_job created on work_order.created")
-    print("  audit_entries created for all events")
+    print("  resident submitted requests")
+    print("  staff dispatched work orders (default routing + override)")
+    print("  contractor started and completed a work order with completion note")
+    print("  integration requested/completed/failed events emitted")
+    print("  partition_key/routing_key/actor assertions passed")
+    print("  every event has exactly one audit entry")

@@ -13,5 +13,7 @@ if __name__ == "__main__":
     print(f"  residence_id={seed_data.residence_id}")
     print(f"  unit_id={seed_data.unit_id}")
     print(f"  resident_user_id={seed_data.resident_user_id}")
+    print(f"  staff_user_id={seed_data.staff_user_id}")
     print(f"  contractor_user_id={seed_data.contractor_user_id}")
+    print(f"  override_contractor_user_id={seed_data.override_contractor_user_id}")
     print(f"  category={seed_data.category}")

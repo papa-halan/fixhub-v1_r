@@ -404,9 +404,16 @@ flowchart LR
   K1 --> C7
   K2 --> C7 --> R2
 ```
+### WorkOrder lifecycle state machine
+```mermaid
+stateDiagram-v2
+  [*] --> assigned: dispatch WorkOrder
+  assigned --> in_progress: contractor starts
+  in_progress --> completed: contractor completes
+  completed --> [*]
+  ```
 
-### Layered architecture (context)
-
+### Layered architecture (context DO NOT ATTEMPT)
 ```mermaid
 flowchart TB
   subgraph IF["Interface layer (context)"]

@@ -13,7 +13,6 @@ from sqlalchemy import (
     Integer,
     Text,
     UniqueConstraint,
-    desc,
     func,
     text,
 )
@@ -91,16 +90,7 @@ class User(Base):
 class MaintenanceRequest(Base):
     __tablename__ = "maintenance_requests"
     __table_args__ = (
-        Index(
-            "ix_maintenance_requests_org_created_at_desc",
-            "org_id",
-            desc("created_at"),
-        ),
-        Index(
-            "ix_maintenance_requests_resident_created_at_desc",
-            "resident_user_id",
-            desc("created_at"),
-        ),
+        Index("ix_maintenance_requests_resident_created_at", "resident_user_id", "created_at"),
     )
 
     request_id: Mapped[uuid.UUID] = uuid_pk()
@@ -135,7 +125,6 @@ class RoutingRule(Base):
             "category",
             name="uq_routing_rules_residence_category",
         ),
-        Index("ix_routing_rules_residence_category", "residence_id", "category"),
     )
 
     rule_id: Mapped[uuid.UUID] = uuid_pk()
@@ -170,7 +159,6 @@ class WorkOrder(Base):
     __table_args__ = (
         UniqueConstraint("request_id", name="uq_work_orders_request_id"),
         Index("ix_work_orders_contractor_status", "contractor_user_id", "status"),
-        Index("ix_work_orders_org_status", "org_id", "status"),
     )
 
     work_order_id: Mapped[uuid.UUID] = uuid_pk()
@@ -216,14 +204,11 @@ class DomainEvent(Base):
     __table_args__ = (
         CheckConstraint(_EVENT_TYPE_CHECK_SQL, name="ck_domain_events_type"),
         Index("ix_domain_events_partition_time", "partition_key", "time"),
-        Index("ix_domain_events_type_time_desc", "type", desc("time")),
-        Index("ix_domain_events_subject_id", "subject_id"),
     )
 
     event_id: Mapped[uuid.UUID] = uuid_pk()
     type: Mapped[str] = mapped_column(Text, nullable=False)
     source: Mapped[str] = mapped_column(Text, nullable=False)
-    subject_type: Mapped[str] = mapped_column(Text, nullable=False)
     subject_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     time: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
@@ -246,7 +231,6 @@ class IntegrationJob(Base):
     __tablename__ = "integration_jobs"
     __table_args__ = (
         Index("ix_integration_jobs_status_created", "status", "created_at"),
-        Index("ix_integration_jobs_work_order_id", "work_order_id"),
     )
 
     job_id: Mapped[uuid.UUID] = uuid_pk()

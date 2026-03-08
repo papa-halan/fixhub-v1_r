@@ -1,5 +1,4 @@
 from __future__ import annotations
-
 import uuid
 from dataclasses import dataclass
 
@@ -15,7 +14,9 @@ class SeedData:
     residence_id: uuid.UUID
     unit_id: uuid.UUID
     resident_user_id: uuid.UUID
+    staff_user_id: uuid.UUID
     contractor_user_id: uuid.UUID
+    override_contractor_user_id: uuid.UUID
     category: str
 
 
@@ -57,11 +58,28 @@ def ensure_seed_data(session: Session) -> SeedData:
         resident = User(
             org_id=org.org_id,
             email="resident@uon.example",
-            password_hash="resident-hash",
+            password_hash="resident-password",
             role=UserRole.resident,
         )
         session.add(resident)
         session.flush()
+    else:
+        resident.password_hash = "resident-password"
+        resident.role = UserRole.resident
+
+    staff = session.scalar(select(User).where(User.email == "staff@uon.example").limit(1))
+    if staff is None:
+        staff = User(
+            org_id=org.org_id,
+            email="staff@uon.example",
+            password_hash="staff-password",
+            role=UserRole.staff,
+        )
+        session.add(staff)
+        session.flush()
+    else:
+        staff.password_hash = "staff-password"
+        staff.role = UserRole.staff
 
     contractor = session.scalar(
         select(User).where(User.email == "contractor@uon.example").limit(1)
@@ -70,11 +88,30 @@ def ensure_seed_data(session: Session) -> SeedData:
         contractor = User(
             org_id=org.org_id,
             email="contractor@uon.example",
-            password_hash="contractor-hash",
+            password_hash="contractor-password",
             role=UserRole.contractor,
         )
         session.add(contractor)
         session.flush()
+    else:
+        contractor.password_hash = "contractor-password"
+        contractor.role = UserRole.contractor
+
+    override_contractor = session.scalar(
+        select(User).where(User.email == "contractor-override@uon.example").limit(1)
+    )
+    if override_contractor is None:
+        override_contractor = User(
+            org_id=org.org_id,
+            email="contractor-override@uon.example",
+            password_hash="contractor-override-password",
+            role=UserRole.contractor,
+        )
+        session.add(override_contractor)
+        session.flush()
+    else:
+        override_contractor.password_hash = "contractor-override-password"
+        override_contractor.role = UserRole.contractor
 
     category = "plumbing"
     routing_rule = session.scalar(
@@ -102,6 +139,8 @@ def ensure_seed_data(session: Session) -> SeedData:
         residence_id=residence.residence_id,
         unit_id=unit.unit_id,
         resident_user_id=resident.user_id,
+        staff_user_id=staff.user_id,
         contractor_user_id=contractor.user_id,
+        override_contractor_user_id=override_contractor.user_id,
         category=category,
     )
