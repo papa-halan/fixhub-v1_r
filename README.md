@@ -13,7 +13,7 @@ Implemented today:
 - Unit tests for policy, event helpers, workflow transitions, auth, and password handling
 
 Not implemented yet:
-- A runnable HTTP API. Files under `app/api/` and `app/main.py` are still placeholders.
+- A runnable HTTP API. `app/main.py` is intentionally empty, and the endpoint table below is indicative only.
 
 Developer docs:
 - [`docs/ARCHITECTURE.md`](/C:/Users/halan/PycharmProjects/fixhub-v1/docs/ARCHITECTURE.md)

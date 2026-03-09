@@ -8,7 +8,7 @@ The repository currently provides:
 - A transaction-scoped service layer in [`app/services/maintenance_coordination.py`](/C:/Users/halan/PycharmProjects/fixhub-v1/app/services/maintenance_coordination.py).
 - Seed and smoke-test scripts in `scripts/`.
 
-The repository does not currently provide a runnable HTTP API. Files under `app/api/` and `app/main.py` are placeholders.
+The repository does not currently provide a runnable HTTP API. `app/main.py` is intentionally empty, and the endpoint table in the README is illustrative only.
 
 ## Session model
 

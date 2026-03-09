@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "fixhub-v1"
 version = "0.1.0"
-description = "UoN Student Living maintenance coordination MVP schema"
+description = "UoN Student Living maintenance coordination MVP schema and service layer"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
