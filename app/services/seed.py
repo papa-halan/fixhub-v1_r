@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import Organisation, Residence, RoutingRule, Unit, User, UserRole
+from app.services.passwords import hash_password
 
 
 @dataclass(frozen=True)
@@ -18,6 +19,10 @@ class SeedData:
     contractor_user_id: uuid.UUID
     override_contractor_user_id: uuid.UUID
     category: str
+
+
+def _set_dev_password(user: User, password: str) -> None:
+    user.password_hash = hash_password(password)
 
 
 def ensure_seed_data(session: Session) -> SeedData:
@@ -58,13 +63,13 @@ def ensure_seed_data(session: Session) -> SeedData:
         resident = User(
             org_id=org.org_id,
             email="resident@uon.example",
-            password_hash="resident-password",
+            password_hash=hash_password("resident-password"),
             role=UserRole.resident,
         )
         session.add(resident)
         session.flush()
     else:
-        resident.password_hash = "resident-password"
+        _set_dev_password(resident, "resident-password")
         resident.role = UserRole.resident
 
     staff = session.scalar(select(User).where(User.email == "staff@uon.example").limit(1))
@@ -72,13 +77,13 @@ def ensure_seed_data(session: Session) -> SeedData:
         staff = User(
             org_id=org.org_id,
             email="staff@uon.example",
-            password_hash="staff-password",
+            password_hash=hash_password("staff-password"),
             role=UserRole.staff,
         )
         session.add(staff)
         session.flush()
     else:
-        staff.password_hash = "staff-password"
+        _set_dev_password(staff, "staff-password")
         staff.role = UserRole.staff
 
     contractor = session.scalar(
@@ -88,13 +93,13 @@ def ensure_seed_data(session: Session) -> SeedData:
         contractor = User(
             org_id=org.org_id,
             email="contractor@uon.example",
-            password_hash="contractor-password",
+            password_hash=hash_password("contractor-password"),
             role=UserRole.contractor,
         )
         session.add(contractor)
         session.flush()
     else:
-        contractor.password_hash = "contractor-password"
+        _set_dev_password(contractor, "contractor-password")
         contractor.role = UserRole.contractor
 
     override_contractor = session.scalar(
@@ -104,13 +109,13 @@ def ensure_seed_data(session: Session) -> SeedData:
         override_contractor = User(
             org_id=org.org_id,
             email="contractor-override@uon.example",
-            password_hash="contractor-override-password",
+            password_hash=hash_password("contractor-override-password"),
             role=UserRole.contractor,
         )
         session.add(override_contractor)
         session.flush()
     else:
-        override_contractor.password_hash = "contractor-override-password"
+        _set_dev_password(override_contractor, "contractor-override-password")
         override_contractor.role = UserRole.contractor
 
     category = "plumbing"

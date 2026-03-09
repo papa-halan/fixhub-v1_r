@@ -2,7 +2,23 @@
 
 This MVP proves **external coordination** for residential maintenance: a resident submits a maintenance request, **staff dispatches** it into a work order (assigning a contractor), the contractor **starts + completes** the job, and the resident can see status updates.
 
-Scope is locked to **Fields, Events, Routing** for a **2‑day build** (everything else is explicitly non-goal).
+Scope is locked to **Fields, Events, Routing** for a **2-day build** (everything else is explicitly non-goal).
+
+## Current status
+
+Implemented today:
+- Postgres schema + Alembic migrations for the maintenance coordination MVP
+- SQLAlchemy workflow service for resident, staff, contractor, event, and integration-job flows
+- Seed and smoke-test scripts for local verification
+- Unit tests for policy, event helpers, workflow transitions, auth, and password handling
+
+Not implemented yet:
+- A runnable HTTP API. Files under `app/api/` and `app/main.py` are still placeholders.
+
+Developer docs:
+- [`docs/ARCHITECTURE.md`](/C:/Users/halan/PycharmProjects/fixhub-v1/docs/ARCHITECTURE.md)
+- [`docs/DEVELOPMENT.md`](/C:/Users/halan/PycharmProjects/fixhub-v1/docs/DEVELOPMENT.md)
+- [`docs/SECURITY.md`](/C:/Users/halan/PycharmProjects/fixhub-v1/docs/SECURITY.md)
 
 ---
 
@@ -27,13 +43,37 @@ Scope is locked to **Fields, Events, Routing** for a **2‑day build** (everythi
 - WorkOrder status: `assigned` → `in_progress` → `completed`
 
 ### Minimal event types (MVP)
-All events use a CloudEvents-like envelope (see below) and are append-only in the event log.
+All events are append-only in the event log and use the CloudEvents-inspired subset documented below.
 
 1) `uon.maintenance_request.submitted`  
 2) `uon.work_order.created`  
 3) `uon.work_order.status_changed`  (to `in_progress`, `completed`)  
 4) `uon.integration.requested`       (notify contractor/resident)  
 5) `uon.integration.completed` / `uon.integration.failed`
+
+### Implemented CloudEvents subset (MVP)
+`DomainEvent` is CloudEvents-inspired, not a full CloudEvents implementation. The MVP stores a subset of CloudEvents concepts in the `domain_events` table plus some internal outbox metadata; it does not currently persist or emit a canonical CloudEvents document.
+
+| `domain_events` column | CloudEvents term | MVP meaning |
+|------------------------|------------------|-------------|
+| `event_id`             | `id`             | Stable UUID generated for each event. If the event is projected as CloudEvents later, this is the intended `id` mapping. |
+| `type`                 | `type`           | Event type, for example `uon.work_order.created`. |
+| `source`               | `source`         | Producer identifier from `EVENT_SOURCE` (default `fixhub.coord`). |
+| `time`                 | `time`           | Event creation timestamp. |
+| `data`                 | `data`           | JSON payload. The MVP only stores JSON payloads. |
+| `subject_id`           | closest to `subject`, but not the same field | UUID of the affected domain entity (`MaintenanceRequest`, `WorkOrder`, or `IntegrationJob`). This is not a CloudEvents `subject` string. |
+| `actor_user_id`        | extension attribute | Internal extension used to attribute the action to a user. |
+| `partition_key`        | no CloudEvents equivalent | Internal ordering/sharding key for the outbox table. |
+| `routing_key`          | no CloudEvents equivalent | Internal routing key derived from org/residence/category. |
+
+Not stored in the MVP event row:
+- `specversion`
+- `datacontenttype` / content-type
+- `dataschema`
+- CloudEvents `subject` as a string attribute
+- trace context such as `traceparent` / `tracestate`
+
+JSON is implied by storage today, but `datacontenttype` is not persisted. If a formal CloudEvents export is added later, it should set `datacontenttype=application/json` explicitly and derive a string `subject` instead of reusing `subject_id` directly.
 
 ### Routing rules (MVP)
 - `partition_key`:
@@ -101,7 +141,7 @@ Paths are **illustrative**. The implementation may use different URLs as long as
 | Resident             |      GET | `/maintenance-requests/{request_id}`          | Resident    | View request + linked WorkOrder status                        | —                                                      |
 | Staff                |      GET | `/staff/maintenance-requests?unactioned=true` | Staff       | List requests without a WorkOrder                             | —                                                      |
 | Staff                |     POST | `/staff/work-orders`                          | Staff       | Dispatch: create `WorkOrder` from request + assign contractor | `uon.work_order.created`, `uon.integration.requested`  |
-| Contractor           |      GET | `/contractor/work-orders?status=assigned      | in_progress | completed`                                                    | Contractor                                             | List contractor work orders | — |
+| Contractor           |      GET | `/contractor/work-orders?status=assigned,in_progress,completed` | Contractor  | List contractor work orders                                   | —                                                      |
 | Contractor           |     POST | `/contractor/work-orders/{id}/start`          | Contractor  | Move WorkOrder → `in_progress`                                | `uon.work_order.status_changed`                        |
 | Contractor           |     POST | `/contractor/work-orders/{id}/complete`       | Contractor  | Move WorkOrder → `completed` (+ optional note)                | `uon.work_order.status_changed`                        |
 | System (integration) | (worker) | (worker)                                      | —           | Run `IntegrationJob` (notifications)                          | `uon.integration.completed` / `uon.integration.failed` |
@@ -134,7 +174,8 @@ Paths are **illustrative**. The implementation may use different URLs as long as
   - `work_order_id`, `org_id`, `request_id` (1:1), `contractor_user_id`, `status`, timestamps
 
 - **domain_events** (append-only outbox / event log)
-  - CloudEvents-like envelope + `data` JSON payload.
+  - CloudEvents-inspired subset: `event_id`, `type`, `source`, `time`, `data`, plus internal metadata `subject_id`, `partition_key`, `routing_key`, `actor_user_id`.
+  - Does not currently store `specversion`, `datacontenttype`, CloudEvents `subject`, or trace context.
   - Includes `actor_user_id` (nullable) for attributing actions to resident/staff/contractor.
 
 - **integration_jobs**
@@ -148,7 +189,7 @@ Paths are **illustrative**. The implementation may use different URLs as long as
 - `MaintenanceRequest` occurs in a `Unit` and is created by a resident `User`.
 - `MaintenanceRequest` becomes a single `WorkOrder` (1:1 for MVP).
 - `RoutingRule` maps `(residence_id, category)` to a contractor `User`.
-- `DomainEvent` uses `subject_id` to reference either a `MaintenanceRequest`, `WorkOrder`, or `IntegrationJob`.
+- `DomainEvent.subject_id` references either a `MaintenanceRequest`, `WorkOrder`, or `IntegrationJob`; it is a polymorphic domain-entity UUID, not the CloudEvents `subject` string attribute.
 - `DomainEvent.actor_user_id` references the `User` who performed the action (resident/staff/contractor).
 - `IntegrationJob` references the triggering `DomainEvent` (traceability).
 
@@ -188,33 +229,59 @@ Paths are **illustrative**. The implementation may use different URLs as long as
 
 ---
 
-## Running locally (placeholder)
+## Running locally
 
-> Incomplete — this section will be filled in once the application scaffold (FastAPI + SQLAlchemy + Alembic) exists.
-
-### Planned prerequisites
+### Prerequisites
 - Python 3.11+
 - PostgreSQL 14+
-- `pip` or `uv`
+- `DATABASE_URL` set to a local database
 
-### Planned environment variables
-- `DATABASE_URL=postgresql+psycopg://...`
-- `JWT_SECRET=...` (or session secret)
+Example:
 
-### Planned commands
 ```bash
-# 1) Create venv and install deps
-# (placeholder)
-
-# 2) Run migrations
-alembic upgrade head
-
-# 3) Seed minimal dev data (org/residence/unit/users/routing_rule)
-python -m scripts.seed_dev
-
-# 4) Run app
-uvicorn app.main:app --reload
+DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/fixhub
 ```
+
+The default `DATABASE_URL` in `app/core/config.py` is a local development fallback only.
+
+### Install
+
+```bash
+python -m venv .venv
+python -m pip install -U pip
+python -m pip install -e ".[dev]"
+```
+
+### Migrate
+
+```bash
+alembic upgrade head
+```
+
+### Seed minimal data
+
+```bash
+python -m scripts.seed_mvp
+```
+
+### Run smoke workflow
+
+```bash
+python -m scripts.smoke_test_mvp
+```
+
+### Run tests and checks
+
+```bash
+pytest -q
+ruff check .
+ruff format .
+mypy app
+bandit -r app
+pip-audit
+```
+
+Authentication remains development-scoped. Seeded users use fixed local passwords, but those passwords are stored as Argon2 hashes and rewritten on each seed run. See `docs/SECURITY.md` for the current limits.
 
 ---
 
@@ -327,10 +394,10 @@ classDiagram
   }
 
   class DomainEvent {
-    +event_id
+    +event_id (UUID / CloudEvents id mapping)
     +type
     +source
-    +subject_id
+    +subject_id (domain entity UUID)
     +time
     +partition_key
     +routing_key
@@ -424,7 +491,7 @@ flowchart TB
   end
 
   subgraph BUS["Event Bus / Router (unspecified transport)"]
-    EB["CloudEvents stream \nstructured JSON"]
+    EB["Event stream \n(CloudEvents-compatible target)"]
   end
 
   subgraph CO["Coordination layer"]

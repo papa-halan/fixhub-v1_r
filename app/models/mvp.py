@@ -8,6 +8,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     Enum,
+    FetchedValue,
     ForeignKey,
     Index,
     Integer,
@@ -159,6 +160,11 @@ class WorkOrder(Base):
     __table_args__ = (
         UniqueConstraint("request_id", name="uq_work_orders_request_id"),
         Index("ix_work_orders_contractor_status", "contractor_user_id", "status"),
+        CheckConstraint(
+            "(status = 'completed' AND completed_at IS NOT NULL) "
+            "OR (status != 'completed' AND completed_at IS NULL)",
+            name="ck_work_orders_completed_at_matches_status",
+        ),
     )
 
     work_order_id: Mapped[uuid.UUID] = uuid_pk()
@@ -196,7 +202,12 @@ class WorkOrder(Base):
         server_default=func.now(),
         onupdate=func.now(),
     )
-    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        server_default=FetchedValue(),
+        server_onupdate=FetchedValue(),
+    )
 
 
 class DomainEvent(Base):

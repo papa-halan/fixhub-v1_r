@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from typing import Iterable
 
 from sqlalchemy import select
@@ -10,11 +9,8 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.models import (
-    AuditEntry,
-    DomainEvent,
     EVENT_INTEGRATION_COMPLETED,
     EVENT_INTEGRATION_FAILED,
-    EVENT_INTEGRATION_REQUESTED,
     EVENT_MAINTENANCE_REQUEST_SUBMITTED,
     EVENT_WORK_ORDER_CREATED,
     EVENT_WORK_ORDER_STATUS_CHANGED,
@@ -22,16 +18,12 @@ from app.models import (
     IntegrationJobStatus,
     MaintenanceRequest,
     Unit,
-    User,
-    UserRole,
     WorkOrder,
     WorkOrderStatus,
 )
+from app.services.events import append_event, request_integration_job
+from app.services.policy import AuthorisationPolicy
 from app.services.routing import lookup_contractor_user_id
-
-
-class AccessDeniedError(PermissionError):
-    pass
 
 
 class InvalidWorkOrderTransitionError(ValueError):
@@ -55,30 +47,49 @@ class ResidentRequestStatus:
     work_order: WorkOrder | None
 
 
+@dataclass(frozen=True)
+class DispatchRequestToWorkOrderCommand:
+    request_id: uuid.UUID
+    staff_user_id: uuid.UUID
+    contractor_user_id_override: uuid.UUID | None = None
+    connector: str = "notify_contractor"
+
+
+@dataclass(frozen=True)
+class DispatchContractorResolution:
+    contractor_user_id: uuid.UUID
+    dispatch_mode: str
+    residence_id: uuid.UUID
+
+
 class MaintenanceCoordinationService:
-    def __init__(self, session: Session, source: str = settings.event_source) -> None:
+    def __init__(
+        self,
+        session: Session,
+        source: str = settings.event_source,
+        policy: AuthorisationPolicy | None = None,
+    ) -> None:
         self.session = session
         self.source = source
+        self.policy = policy or AuthorisationPolicy(session)
 
-    def _get_active_user(
-        self,
-        *,
-        user_id: uuid.UUID,
-        expected_role: UserRole,
-        org_id: uuid.UUID | None = None,
-    ) -> User:
-        user = self.session.get(User, user_id)
-        if user is None:
-            raise ValueError(f"User {user_id} does not exist")
-        if not user.is_active:
-            raise AccessDeniedError(f"User {user_id} is inactive")
-        if user.role != expected_role:
-            raise AccessDeniedError(
-                f"User {user_id} has role={user.role.value}, expected={expected_role.value}"
-            )
-        if org_id is not None and user.org_id not in (None, org_id):
-            raise AccessDeniedError(f"User {user_id} is not allowed to act in org {org_id}")
-        return user
+    def _get_maintenance_request(self, request_id: uuid.UUID) -> MaintenanceRequest:
+        request = self.session.get(MaintenanceRequest, request_id)
+        if request is None:
+            raise ValueError(f"MaintenanceRequest {request_id} does not exist")
+        return request
+
+    def _get_work_order(self, work_order_id: uuid.UUID) -> WorkOrder:
+        work_order = self.session.get(WorkOrder, work_order_id)
+        if work_order is None:
+            raise ValueError(f"WorkOrder {work_order_id} does not exist")
+        return work_order
+
+    def _get_integration_job(self, job_id: uuid.UUID) -> IntegrationJob:
+        integration_job = self.session.get(IntegrationJob, job_id)
+        if integration_job is None:
+            raise ValueError(f"IntegrationJob {job_id} does not exist")
+        return integration_job
 
     def _get_residence_id_for_unit(self, unit_id: uuid.UUID) -> uuid.UUID:
         residence_id = self.session.scalar(
@@ -88,64 +99,120 @@ class MaintenanceCoordinationService:
             raise ValueError(f"Unit {unit_id} does not exist")
         return residence_id
 
-    def _append_event(
-        self,
-        *,
-        event_type: str,
-        subject_id: uuid.UUID,
-        partition_key: str,
-        routing_key: str,
-        actor_user_id: uuid.UUID | None,
-        data: dict[str, object] | None = None,
-    ) -> DomainEvent:
-        event = DomainEvent(
-            type=event_type,
-            source=self.source,
-            subject_id=subject_id,
-            partition_key=partition_key,
-            routing_key=routing_key,
-            actor_user_id=actor_user_id,
-            data=data or {},
+    def _ensure_request_has_no_work_order(self, request_id: uuid.UUID) -> None:
+        existing_work_order_id = self.session.scalar(
+            select(WorkOrder.work_order_id).where(WorkOrder.request_id == request_id).limit(1)
         )
-        self.session.add(event)
-        self.session.flush()
-        self.session.add(AuditEntry(event_id=event.event_id))
-        return event
+        if existing_work_order_id is not None:
+            raise ValueError(
+                f"WorkOrder already exists for request_id={request_id}: {existing_work_order_id}"
+            )
 
-    def _request_integration_job(
+    def _load_dispatch_request(
+        self,
+        command: DispatchRequestToWorkOrderCommand,
+    ) -> MaintenanceRequest:
+        request = self._get_maintenance_request(command.request_id)
+        self.policy.require_staff(user_id=command.staff_user_id, org_id=request.org_id)
+        self._ensure_request_has_no_work_order(command.request_id)
+        return request
+
+    def _resolve_dispatch_contractor(
         self,
         *,
-        work_order_id: uuid.UUID,
-        routing_key: str,
-        actor_user_id: uuid.UUID | None,
-        connector: str,
-        data: dict[str, object] | None = None,
-    ) -> IntegrationJob:
-        job_id = uuid.uuid4()
-        event = self._append_event(
-            event_type=EVENT_INTEGRATION_REQUESTED,
-            subject_id=job_id,
-            partition_key=str(work_order_id),
+        command: DispatchRequestToWorkOrderCommand,
+        request: MaintenanceRequest,
+    ) -> DispatchContractorResolution:
+        residence_id = self._get_residence_id_for_unit(request.unit_id)
+        if command.contractor_user_id_override is not None:
+            contractor = self.policy.require_contractor(
+                user_id=command.contractor_user_id_override,
+                org_id=request.org_id,
+            )
+            return DispatchContractorResolution(
+                contractor_user_id=contractor.user_id,
+                dispatch_mode="override",
+                residence_id=residence_id,
+            )
+
+        contractor_user_id = lookup_contractor_user_id(
+            self.session,
+            residence_id=residence_id,
+            category=request.category,
+        )
+        contractor = self.policy.require_contractor(
+            user_id=contractor_user_id,
+            org_id=request.org_id,
+        )
+        return DispatchContractorResolution(
+            contractor_user_id=contractor.user_id,
+            dispatch_mode="routing_rule",
+            residence_id=residence_id,
+        )
+
+    def _create_work_order_for_dispatch(
+        self,
+        *,
+        request: MaintenanceRequest,
+        resolution: DispatchContractorResolution,
+    ) -> WorkOrder:
+        work_order = WorkOrder(
+            org_id=request.org_id,
+            request_id=request.request_id,
+            contractor_user_id=resolution.contractor_user_id,
+            status=WorkOrderStatus.assigned,
+        )
+        self.session.add(work_order)
+        self.session.flush()
+        return work_order
+
+    def _emit_dispatched_work_order_event(
+        self,
+        *,
+        command: DispatchRequestToWorkOrderCommand,
+        request: MaintenanceRequest,
+        work_order: WorkOrder,
+        resolution: DispatchContractorResolution,
+    ) -> str:
+        routing_key = build_routing_key(
+            request.org_id,
+            resolution.residence_id,
+            request.category,
+        )
+        append_event(
+            self.session,
+            source=self.source,
+            event_type=EVENT_WORK_ORDER_CREATED,
+            subject_id=work_order.work_order_id,
+            partition_key=str(work_order.work_order_id),
             routing_key=routing_key,
-            actor_user_id=actor_user_id,
+            actor_user_id=command.staff_user_id,
             data={
-                "job_id": str(job_id),
-                "connector": connector,
-                "status": IntegrationJobStatus.requested.value,
-                **(data or {}),
+                "request_id": str(request.request_id),
+                "contractor_user_id": str(resolution.contractor_user_id),
+                "status": work_order.status.value,
+                "dispatch_mode": resolution.dispatch_mode,
             },
         )
-        integration_job = IntegrationJob(
-            job_id=job_id,
-            event_id=event.event_id,
-            work_order_id=work_order_id,
-            connector=connector,
-            status=IntegrationJobStatus.requested,
-            attempts=0,
+        return routing_key
+
+    def _request_dispatch_integration_job(
+        self,
+        *,
+        command: DispatchRequestToWorkOrderCommand,
+        request: MaintenanceRequest,
+        work_order: WorkOrder,
+        routing_key: str,
+    ) -> IntegrationJob:
+        return request_integration_job(
+            self.session,
+            source=self.source,
+            work_order_id=work_order.work_order_id,
+            routing_key=routing_key,
+            actor_user_id=command.staff_user_id,
+            connector=command.connector,
+            data={"request_id": str(request.request_id)},
         )
-        self.session.add(integration_job)
-        self.session.flush()
-        return integration_job
 
     def submit_maintenance_request(
         self,
@@ -157,9 +224,8 @@ class MaintenanceCoordinationService:
         description: str,
         priority: str | None = None,
     ) -> MaintenanceRequest:
-        self._get_active_user(
+        self.policy.require_resident(
             user_id=resident_user_id,
-            expected_role=UserRole.resident,
             org_id=org_id,
         )
         residence_id = self._get_residence_id_for_unit(unit_id)
@@ -175,7 +241,9 @@ class MaintenanceCoordinationService:
         self.session.add(request)
         self.session.flush()
 
-        self._append_event(
+        append_event(
+            self.session,
+            source=self.source,
             event_type=EVENT_MAINTENANCE_REQUEST_SUBMITTED,
             subject_id=request.request_id,
             partition_key=str(org_id),
@@ -194,14 +262,11 @@ class MaintenanceCoordinationService:
         resident_user_id: uuid.UUID,
         request_id: uuid.UUID,
     ) -> ResidentRequestStatus:
-        self._get_active_user(user_id=resident_user_id, expected_role=UserRole.resident)
-        request = self.session.get(MaintenanceRequest, request_id)
-        if request is None:
-            raise ValueError(f"MaintenanceRequest {request_id} does not exist")
-        if request.resident_user_id != resident_user_id:
-            raise AccessDeniedError(
-                f"MaintenanceRequest {request_id} is not owned by resident {resident_user_id}"
-            )
+        request = self._get_maintenance_request(request_id)
+        self.policy.require_request_owner(
+            request=request,
+            resident_user_id=resident_user_id,
+        )
 
         work_order = self.session.scalar(
             select(WorkOrder).where(WorkOrder.request_id == request_id).limit(1)
@@ -214,14 +279,10 @@ class MaintenanceCoordinationService:
         staff_user_id: uuid.UUID,
         org_id: uuid.UUID | None = None,
     ) -> list[MaintenanceRequest]:
-        staff = self._get_active_user(user_id=staff_user_id, expected_role=UserRole.staff)
-        resolved_org_id = org_id if org_id is not None else staff.org_id
-        if resolved_org_id is None:
-            raise ValueError("org_id is required when staff user has no org assignment")
-        if staff.org_id not in (None, resolved_org_id):
-            raise AccessDeniedError(
-                f"Staff user {staff_user_id} cannot list requests for org {resolved_org_id}"
-            )
+        resolved_org_id = self.policy.resolve_staff_org_scope(
+            staff_user_id=staff_user_id,
+            requested_org_id=org_id,
+        )
 
         return list(
             self.session.scalars(
@@ -244,76 +305,29 @@ class MaintenanceCoordinationService:
         contractor_user_id_override: uuid.UUID | None = None,
         connector: str = "notify_contractor",
     ) -> tuple[WorkOrder, IntegrationJob]:
-        request = self.session.get(MaintenanceRequest, request_id)
-        if request is None:
-            raise ValueError(f"MaintenanceRequest {request_id} does not exist")
-
-        self._get_active_user(
-            user_id=staff_user_id,
-            expected_role=UserRole.staff,
-            org_id=request.org_id,
-        )
-
-        existing_work_order_id = self.session.scalar(
-            select(WorkOrder.work_order_id).where(WorkOrder.request_id == request_id).limit(1)
-        )
-        if existing_work_order_id is not None:
-            raise ValueError(
-                f"WorkOrder already exists for request_id={request_id}: {existing_work_order_id}"
-            )
-
-        residence_id = self._get_residence_id_for_unit(request.unit_id)
-        if contractor_user_id_override is not None:
-            contractor_user = self._get_active_user(
-                user_id=contractor_user_id_override,
-                expected_role=UserRole.contractor,
-                org_id=request.org_id,
-            )
-            contractor_user_id = contractor_user.user_id
-            dispatch_mode = "override"
-        else:
-            contractor_user_id = lookup_contractor_user_id(
-                self.session,
-                residence_id=residence_id,
-                category=request.category,
-            )
-            self._get_active_user(
-                user_id=contractor_user_id,
-                expected_role=UserRole.contractor,
-                org_id=request.org_id,
-            )
-            dispatch_mode = "routing_rule"
-
-        work_order = WorkOrder(
-            org_id=request.org_id,
-            request_id=request.request_id,
-            contractor_user_id=contractor_user_id,
-            status=WorkOrderStatus.assigned,
-        )
-        self.session.add(work_order)
-        self.session.flush()
-
-        routing_key = build_routing_key(request.org_id, residence_id, request.category)
-        self._append_event(
-            event_type=EVENT_WORK_ORDER_CREATED,
-            subject_id=work_order.work_order_id,
-            partition_key=str(work_order.work_order_id),
-            routing_key=routing_key,
-            actor_user_id=staff_user_id,
-            data={
-                "request_id": str(request.request_id),
-                "contractor_user_id": str(contractor_user_id),
-                "status": work_order.status.value,
-                "dispatch_mode": dispatch_mode,
-            },
-        )
-
-        integration_job = self._request_integration_job(
-            work_order_id=work_order.work_order_id,
-            routing_key=routing_key,
-            actor_user_id=staff_user_id,
+        command = DispatchRequestToWorkOrderCommand(
+            request_id=request_id,
+            staff_user_id=staff_user_id,
+            contractor_user_id_override=contractor_user_id_override,
             connector=connector,
-            data={"request_id": str(request.request_id)},
+        )
+        request = self._load_dispatch_request(command)
+        resolution = self._resolve_dispatch_contractor(command=command, request=request)
+        work_order = self._create_work_order_for_dispatch(
+            request=request,
+            resolution=resolution,
+        )
+        routing_key = self._emit_dispatched_work_order_event(
+            command=command,
+            request=request,
+            work_order=work_order,
+            resolution=resolution,
+        )
+        integration_job = self._request_dispatch_integration_job(
+            command=command,
+            request=request,
+            work_order=work_order,
+            routing_key=routing_key,
         )
         return work_order, integration_job
 
@@ -334,7 +348,7 @@ class MaintenanceCoordinationService:
         contractor_user_id: uuid.UUID,
         statuses: Iterable[WorkOrderStatus | str] | None = None,
     ) -> list[WorkOrder]:
-        self._get_active_user(user_id=contractor_user_id, expected_role=UserRole.contractor)
+        self.policy.require_contractor(user_id=contractor_user_id)
         normalized_statuses = self._normalize_statuses(statuses)
         stmt = (
             select(WorkOrder)
@@ -353,18 +367,11 @@ class MaintenanceCoordinationService:
         to_status: WorkOrderStatus,
         completion_note: str | None = None,
     ) -> WorkOrder:
-        work_order = self.session.get(WorkOrder, work_order_id)
-        if work_order is None:
-            raise ValueError(f"WorkOrder {work_order_id} does not exist")
-        self._get_active_user(
-            user_id=contractor_user_id,
-            expected_role=UserRole.contractor,
-            org_id=work_order.org_id,
+        work_order = self._get_work_order(work_order_id)
+        self.policy.require_assigned_contractor(
+            work_order=work_order,
+            contractor_user_id=contractor_user_id,
         )
-        if work_order.contractor_user_id != contractor_user_id:
-            raise AccessDeniedError(
-                f"Contractor {contractor_user_id} is not assigned to work_order {work_order_id}"
-            )
 
         allowed_next = _ALLOWED_TRANSITIONS[work_order.status]
         if to_status not in allowed_next:
@@ -373,17 +380,12 @@ class MaintenanceCoordinationService:
             )
 
         previous_status = work_order.status
-        now = datetime.now(timezone.utc)
         work_order.status = to_status
-        work_order.updated_at = now
-        if to_status == WorkOrderStatus.completed:
-            work_order.completed_at = now
         self.session.flush()
+        if to_status == WorkOrderStatus.completed:
+            self.session.refresh(work_order, attribute_names=["completed_at"])
 
-        request = self.session.get(MaintenanceRequest, work_order.request_id)
-        if request is None:
-            raise ValueError(f"MaintenanceRequest {work_order.request_id} does not exist")
-
+        request = self._get_maintenance_request(work_order.request_id)
         residence_id = self._get_residence_id_for_unit(request.unit_id)
         event_data: dict[str, object] = {
             "from": previous_status.value,
@@ -392,7 +394,9 @@ class MaintenanceCoordinationService:
         if completion_note is not None:
             event_data["completion_note"] = completion_note
 
-        self._append_event(
+        append_event(
+            self.session,
+            source=self.source,
             event_type=EVENT_WORK_ORDER_STATUS_CHANGED,
             subject_id=work_order.work_order_id,
             partition_key=str(work_order.work_order_id),
@@ -432,11 +436,11 @@ class MaintenanceCoordinationService:
 
         integration_job: IntegrationJob | None = None
         if create_resident_notification_job:
-            request = self.session.get(MaintenanceRequest, work_order.request_id)
-            if request is None:
-                raise ValueError(f"MaintenanceRequest {work_order.request_id} does not exist")
+            request = self._get_maintenance_request(work_order.request_id)
             residence_id = self._get_residence_id_for_unit(request.unit_id)
-            integration_job = self._request_integration_job(
+            integration_job = request_integration_job(
+                self.session,
+                source=self.source,
                 work_order_id=work_order.work_order_id,
                 routing_key=build_routing_key(
                     work_order.org_id,
@@ -471,12 +475,9 @@ class MaintenanceCoordinationService:
         actor_user_id: uuid.UUID | None = None,
         error_message: str | None = None,
     ) -> IntegrationJob:
-        integration_job = self.session.get(IntegrationJob, job_id)
-        if integration_job is None:
-            raise ValueError(f"IntegrationJob {job_id} does not exist")
+        integration_job = self._get_integration_job(job_id)
 
         integration_job.attempts += 1
-        integration_job.updated_at = datetime.now(timezone.utc)
         if succeeded:
             integration_job.status = IntegrationJobStatus.completed
             integration_job.last_error = None
@@ -487,15 +488,12 @@ class MaintenanceCoordinationService:
             event_type = EVENT_INTEGRATION_FAILED
         self.session.flush()
 
-        work_order = self.session.get(WorkOrder, integration_job.work_order_id)
-        if work_order is None:
-            raise ValueError(f"WorkOrder {integration_job.work_order_id} does not exist")
-        request = self.session.get(MaintenanceRequest, work_order.request_id)
-        if request is None:
-            raise ValueError(f"MaintenanceRequest {work_order.request_id} does not exist")
-
+        work_order = self._get_work_order(integration_job.work_order_id)
+        request = self._get_maintenance_request(work_order.request_id)
         residence_id = self._get_residence_id_for_unit(request.unit_id)
-        self._append_event(
+        append_event(
+            self.session,
+            source=self.source,
             event_type=event_type,
             subject_id=integration_job.job_id,
             partition_key=str(work_order.work_order_id),

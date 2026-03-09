@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import User
+from app.services.passwords import verify_and_upgrade_password_hash
 
 
 class AuthenticationError(ValueError):
@@ -18,8 +19,12 @@ def login(*, session: Session, email: str, password: str) -> User:
         raise AuthenticationError("Invalid credentials")
     if not user.is_active:
         raise AuthenticationError("User is inactive")
-    if user.password_hash != password:
+    password_valid, upgraded_hash = verify_and_upgrade_password_hash(user.password_hash, password)
+    if not password_valid:
         raise AuthenticationError("Invalid credentials")
+    if upgraded_hash is not None:
+        user.password_hash = upgraded_hash
+        session.flush()
     return user
 
 
