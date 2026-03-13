@@ -10,7 +10,16 @@
     <li class="timeline-row">
       <div class="timeline-time">{{ event.created_at|timestamp }}</div>
       <div class="timeline-entry">
-        <div class="timeline-actor">{{ event.actor_label }}</div>
+        <div class="timeline-actor">
+          {{ event.actor_name }}
+          {% if event.actor_role_label and event.organisation_name %}
+          <span class="timeline-actor-meta">({{ event.actor_role_label }}, {{ event.organisation_name }})</span>
+          {% elif event.actor_role_label %}
+          <span class="timeline-actor-meta">({{ event.actor_role_label }})</span>
+          {% elif event.organisation_name %}
+          <span class="timeline-actor-meta">({{ event.organisation_name }})</span>
+          {% endif %}
+        </div>
         <p>{{ event.message }}</p>
       </div>
     </li>

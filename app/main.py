@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Request, status
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
@@ -36,9 +36,10 @@ ROLE_HOMES = {
 }
 
 STATUS_EVENT_MESSAGES = {
-    JobStatus.assigned: "Job marked assigned",
-    JobStatus.in_progress: "Work started",
-    JobStatus.completed: "Job completed",
+    JobStatus.new: "Moved job back to new",
+    JobStatus.assigned: "Marked job assigned",
+    JobStatus.in_progress: "Marked job in progress",
+    JobStatus.completed: "Marked job completed",
 }
 
 ALLOWED_STATUS_CHANGES = {
@@ -106,7 +107,9 @@ def event_query(job_id: uuid.UUID):
     )
 
 
-def current_selector(request: Request) -> str:
+def current_selector(request: Request) -> str | None:
+    if request.url.path.startswith("/api"):
+        return getattr(request.state, "api_user_email", None)
     return (
         request.query_params.get("as_user")
         or request.headers.get("X-User-Email")
@@ -119,7 +122,10 @@ def get_current_user(
     request: Request,
     session: Session = Depends(get_session),
 ) -> User:
-    user = session.scalar(user_query().where(User.email == current_selector(request)).limit(1))
+    selector = current_selector(request)
+    if selector is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+    user = session.scalar(user_query().where(User.email == selector).limit(1))
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unknown user")
     return user
@@ -145,14 +151,46 @@ def navigation_for(user: User) -> list[dict[str, str]]:
     return [{"label": "Contractor Job List", "href": "/contractor/jobs"}]
 
 
-def actor_label(event: Event) -> str:
-    if event.actor_user and event.actor_user.role == UserRole.resident:
-        return "Resident"
-    if event.actor_org:
-        return event.actor_org.name
+def actor_name(event: Event) -> str:
     if event.actor_user:
         return event.actor_user.name
+    if event.actor_org:
+        return event.actor_org.name
     return "System"
+
+
+def actor_role_value(event: Event) -> str | None:
+    if event.actor_user:
+        return event.actor_user.role.value
+    return None
+
+
+def actor_role_label(event: Event) -> str | None:
+    role = actor_role_value(event)
+    if role is None:
+        return None
+    return role.replace("_", " ").title()
+
+
+def organisation_name(event: Event) -> str | None:
+    if event.actor_user and event.actor_user.organisation:
+        return event.actor_user.organisation.name
+    if event.actor_org:
+        return event.actor_org.name
+    return None
+
+
+def actor_label(event: Event) -> str:
+    name = actor_name(event)
+    role = actor_role_label(event)
+    organisation = organisation_name(event)
+    if role and organisation:
+        return f"{name} ({role}, {organisation})"
+    if role:
+        return f"{name} ({role})"
+    if organisation:
+        return f"{name} ({organisation})"
+    return name
 
 
 def serialize_user(user: User) -> dict[str, object]:
@@ -187,11 +225,16 @@ def serialize_job(job: Job) -> dict[str, object]:
 
 
 def serialize_event(event: Event) -> dict[str, object]:
+    role = actor_role_value(event)
     return {
         "id": event.id,
         "job_id": event.job_id,
         "actor_user_id": event.actor_user_id,
         "actor_org_id": event.actor_org_id,
+        "actor_name": actor_name(event),
+        "actor_role": role,
+        "actor_role_label": actor_role_label(event),
+        "organisation_name": organisation_name(event),
         "actor_label": actor_label(event),
         "message": event.message,
         "created_at": event.created_at,
@@ -274,6 +317,7 @@ def append_event(session: Session, *, job: Job, actor: User, message: str) -> Ev
         actor_user_id=actor.id,
         actor_org_id=actor.organisation_id,
         message=message,
+        created_at=datetime.now(timezone.utc),
     )
     session.add(event)
     session.flush()
@@ -339,6 +383,30 @@ def create_app(database_url: str | None = None) -> FastAPI:
     app.state.engine = engine
     app.state.SessionLocal = session_factory
     app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
+
+    @app.middleware("http")
+    async def resolve_api_user(request: Request, call_next):
+        if not request.url.path.startswith("/api"):
+            return await call_next(request)
+
+        user_email = (request.headers.get("X-User-Email") or "").strip()
+        if not user_email:
+            return JSONResponse(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                content={"detail": "X-User-Email header required"},
+            )
+
+        with session_factory() as auth_session:
+            user = auth_session.scalar(user_query().where(User.email == user_email).limit(1))
+
+        if user is None:
+            return JSONResponse(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                content={"detail": "Unknown user"},
+            )
+
+        request.state.api_user_email = user_email
+        return await call_next(request)
 
     @app.get("/", include_in_schema=False)
     def home(current_user: User = Depends(get_current_user)):
@@ -422,9 +490,10 @@ def create_app(database_url: str | None = None) -> FastAPI:
             if requested_org_id is None:
                 if job.assigned_org_id is not None:
                     job.assigned_org_id = None
+                    messages.append("Assignment cleared")
                     if job.status == JobStatus.assigned and "status" not in changes:
                         job.status = JobStatus.new
-                    messages.append("Assignment cleared")
+                        messages.append(STATUS_EVENT_MESSAGES[JobStatus.new])
             elif requested_org_id != job.assigned_org_id:
                 organisation = session.get(Organisation, requested_org_id)
                 if organisation is None:
@@ -433,9 +502,10 @@ def create_app(database_url: str | None = None) -> FastAPI:
                     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only contractor organisations can be assigned")
                 was_assigned = job.assigned_org_id is not None
                 job.assigned_org = organisation
+                messages.append(f"{'Reassigned' if was_assigned else 'Assigned'} {organisation.name}")
                 if job.status == JobStatus.new and "status" not in changes:
                     job.status = JobStatus.assigned
-                messages.append(f"{'Reassigned' if was_assigned else 'Assigned'} {organisation.name}")
+                    messages.append(STATUS_EVENT_MESSAGES[JobStatus.assigned])
 
         if "status" in changes:
             status_message = apply_status_change(job, changes["status"], current_user)

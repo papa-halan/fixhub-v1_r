@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import DateTime, Uuid, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -16,4 +16,9 @@ def uuid_pk() -> Mapped[uuid.UUID]:
 
 
 def created_timestamp() -> Mapped[datetime]:
-    return mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    return mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+    )

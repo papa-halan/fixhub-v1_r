@@ -1,7 +1,14 @@
 async function sendJson(url, method, payload) {
+  const headers = { "Content-Type": "application/json" };
+  const currentUserEmail = document.body?.dataset?.userEmail;
+
+  if (currentUserEmail) {
+    headers["X-User-Email"] = currentUserEmail;
+  }
+
   const response = await fetch(url, {
     method,
-    headers: { "Content-Type": "application/json" },
+    headers,
     credentials: "same-origin",
     body: JSON.stringify(payload),
   });

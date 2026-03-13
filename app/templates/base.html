@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="/static/styles.css">
   <script src="/static/app.js"></script>
 </head>
-<body>
+<body data-user-email="{{ current_user.email }}">
   <header class="shell-header">
     <div>
       <a class="brand" href="{{ home_path }}">FixHub</a>

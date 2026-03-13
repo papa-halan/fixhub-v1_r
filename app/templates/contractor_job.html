@@ -37,13 +37,14 @@
     <section class="panel">
       <div class="panel-header">
         <h2>Add event</h2>
-        <p>Examples: arrival time, scheduling note, access issue, resolution note.</p>
+        <p>Use short operational notes so the shared timeline stays clear.</p>
       </div>
       <form id="contractor-event-form" class="form-grid" method="post">
         <label>
           Message
-          <textarea name="message" placeholder="Scheduled visit tomorrow 10am." required></textarea>
+          <textarea name="message" placeholder="contractor confirmed tomorrow visit" required></textarea>
         </label>
+        <p class="muted form-helper">Examples: contractor confirmed tomorrow visit, waiting on spare parts, inspection complete, resident granted access.</p>
         <div class="actions">
           <button class="button" type="submit">Add update</button>
         </div>
