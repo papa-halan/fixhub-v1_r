@@ -31,7 +31,7 @@
         <h2>Assign contractor</h2>
         <p>{{ job.assigned_org_name or "No contractor assigned yet." }}</p>
       </div>
-      <form id="assign-form" class="form-grid">
+      <form id="assign-form" class="form-grid" method="post">
         <label>
           Contractor organisation
           <select name="assigned_org_id" required>
@@ -66,7 +66,7 @@
         <h2>Add event</h2>
         <p>Free text only. Keep it short and readable.</p>
       </div>
-      <form id="event-form" class="form-grid">
+      <form id="event-form" class="form-grid" method="post">
         <label>
           Message
           <textarea name="message" placeholder="Contractor confirmed tomorrow morning visit." required></textarea>

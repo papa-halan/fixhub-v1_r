@@ -110,3 +110,14 @@ def test_resident_admin_contractor_flow(tmp_path) -> None:
         assert resident_page.status_code == 200
         assert "Event Timeline" in resident_page.text
         assert "Scheduled visit tomorrow 10am" in resident_page.text
+
+
+def test_report_page_wires_post_form(tmp_path) -> None:
+    _, client = build_client(tmp_path)
+
+    with client:
+        response = client.get("/resident/report", headers=auth_headers("resident@fixhub.test"))
+
+    assert response.status_code == 200
+    assert 'script src="/static/app.js"></script>' in response.text
+    assert 'form id="report-form" class="form-grid" method="post"' in response.text
