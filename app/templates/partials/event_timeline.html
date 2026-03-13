@@ -1,0 +1,22 @@
+<section class="panel timeline-panel">
+  <div class="panel-header">
+    <h2>Event Timeline</h2>
+    <p>Every role reads the same shared log.</p>
+  </div>
+
+  {% if events %}
+  <ol class="timeline">
+    {% for event in events %}
+    <li class="timeline-row">
+      <div class="timeline-time">{{ event.created_at|timestamp }}</div>
+      <div class="timeline-entry">
+        <div class="timeline-actor">{{ event.actor_label }}</div>
+        <p>{{ event.message }}</p>
+      </div>
+    </li>
+    {% endfor %}
+  </ol>
+  {% else %}
+  <p class="empty-state">No events yet.</p>
+  {% endif %}
+</section>

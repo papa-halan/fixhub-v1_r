@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Job Timeline | FixHub{% endblock %}
+{% block content %}
+<section class="detail-grid">
+  <article class="panel">
+    <p class="eyebrow">Resident</p>
+    <h1>{{ job.title }}</h1>
+    <div class="meta-list">
+      <div class="meta-item">
+        <span>Status</span>
+        <strong>{{ job.status_label }}</strong>
+      </div>
+      <div class="meta-item">
+        <span>Location</span>
+        <strong>{{ job.location }}</strong>
+      </div>
+      <div class="meta-item">
+        <span>Description</span>
+        <strong>{{ job.description }}</strong>
+      </div>
+      <div class="meta-item">
+        <span>Assigned contractor</span>
+        <strong>{{ job.assigned_org_name or "Not assigned yet" }}</strong>
+      </div>
+    </div>
+  </article>
+
+  {% include "partials/event_timeline.html" %}
+</section>
+{% endblock %}

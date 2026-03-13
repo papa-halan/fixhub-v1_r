@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% block title %}Admin Job Page | FixHub{% endblock %}
+{% block content %}
+<section class="detail-grid">
+  <article class="grid">
+    <section class="panel">
+      <p class="eyebrow">Admin</p>
+      <h1>{{ job.title }}</h1>
+      <div class="meta-list">
+        <div class="meta-item">
+          <span>Status</span>
+          <strong>{{ job.status_label }}</strong>
+        </div>
+        <div class="meta-item">
+          <span>Resident</span>
+          <strong>{{ job.created_by_name }}</strong>
+        </div>
+        <div class="meta-item">
+          <span>Location</span>
+          <strong>{{ job.location }}</strong>
+        </div>
+        <div class="meta-item">
+          <span>Description</span>
+          <strong>{{ job.description }}</strong>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-header">
+        <h2>Assign contractor</h2>
+        <p>{{ job.assigned_org_name or "No contractor assigned yet." }}</p>
+      </div>
+      <form id="assign-form" class="form-grid">
+        <label>
+          Contractor organisation
+          <select name="assigned_org_id" required>
+            <option value="">Choose contractor</option>
+            {% for organisation in contractor_orgs %}
+            <option value="{{ organisation.id }}" {% if organisation.id == job.assigned_org_id %}selected{% endif %}>{{ organisation.name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <div class="actions">
+          <button class="button" type="submit">Assign contractor</button>
+        </div>
+        <p class="feedback" data-feedback></p>
+      </form>
+    </section>
+
+    <section class="panel">
+      <div class="panel-header">
+        <h2>Admin controls</h2>
+        <p>Use status changes sparingly. Most detail belongs in the timeline.</p>
+      </div>
+      <div class="actions">
+        <button class="button secondary" data-status="assigned" type="button">Mark assigned</button>
+        <button class="button secondary" data-status="in_progress" type="button">Mark in progress</button>
+        <button class="button secondary" data-status="completed" type="button">Mark completed</button>
+      </div>
+      <p class="feedback" id="status-feedback"></p>
+    </section>
+
+    <section class="panel">
+      <div class="panel-header">
+        <h2>Add event</h2>
+        <p>Free text only. Keep it short and readable.</p>
+      </div>
+      <form id="event-form" class="form-grid">
+        <label>
+          Message
+          <textarea name="message" placeholder="Contractor confirmed tomorrow morning visit." required></textarea>
+        </label>
+        <div class="actions">
+          <button class="button ghost" type="submit">Add note</button>
+        </div>
+        <p class="feedback" data-feedback></p>
+      </form>
+    </section>
+  </article>
+
+  {% include "partials/event_timeline.html" %}
+</section>
+
+<script>
+  const reloadPage = () => window.location.reload();
+
+  FixHub.wireJsonForm(document.getElementById("assign-form"), async (formData) => {
+    await FixHub.sendJson("/api/jobs/{{ job.id }}", "PATCH", {
+      assigned_org_id: formData.get("assigned_org_id"),
+    });
+    reloadPage();
+  });
+
+  FixHub.wireJsonForm(document.getElementById("event-form"), async (formData) => {
+    await FixHub.sendJson("/api/jobs/{{ job.id }}/events", "POST", {
+      message: formData.get("message"),
+    });
+    reloadPage();
+  });
+
+  document.querySelectorAll("[data-status]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const feedback = document.getElementById("status-feedback");
+      feedback.textContent = "";
+      try {
+        await FixHub.sendJson("/api/jobs/{{ job.id }}", "PATCH", { status: button.dataset.status });
+        reloadPage();
+      } catch (error) {
+        feedback.textContent = error.message;
+      }
+    });
+  });
+</script>
+{% endblock %}

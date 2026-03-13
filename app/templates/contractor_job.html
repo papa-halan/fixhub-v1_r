@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}Contractor Job Page | FixHub{% endblock %}
+{% block content %}
+<section class="detail-grid">
+  <article class="grid">
+    <section class="panel">
+      <p class="eyebrow">Contractor</p>
+      <h1>{{ job.title }}</h1>
+      <div class="meta-list">
+        <div class="meta-item">
+          <span>Status</span>
+          <strong>{{ job.status_label }}</strong>
+        </div>
+        <div class="meta-item">
+          <span>Location</span>
+          <strong>{{ job.location }}</strong>
+        </div>
+        <div class="meta-item">
+          <span>Description</span>
+          <strong>{{ job.description }}</strong>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-header">
+        <h2>Progress controls</h2>
+        <p>Only change status when the work state changes.</p>
+      </div>
+      <div class="actions">
+        <button class="button secondary" data-status="in_progress" type="button">Start work</button>
+        <button class="button secondary" data-status="completed" type="button">Mark completed</button>
+      </div>
+      <p class="feedback" id="contractor-status-feedback"></p>
+    </section>
+
+    <section class="panel">
+      <div class="panel-header">
+        <h2>Add event</h2>
+        <p>Examples: arrival time, scheduling note, access issue, resolution note.</p>
+      </div>
+      <form id="contractor-event-form" class="form-grid">
+        <label>
+          Message
+          <textarea name="message" placeholder="Scheduled visit tomorrow 10am." required></textarea>
+        </label>
+        <div class="actions">
+          <button class="button" type="submit">Add update</button>
+        </div>
+        <p class="feedback" data-feedback></p>
+      </form>
+    </section>
+  </article>
+
+  {% include "partials/event_timeline.html" %}
+</section>
+
+<script>
+  const refresh = () => window.location.reload();
+
+  FixHub.wireJsonForm(document.getElementById("contractor-event-form"), async (formData) => {
+    await FixHub.sendJson("/api/jobs/{{ job.id }}/events", "POST", {
+      message: formData.get("message"),
+    });
+    refresh();
+  });
+
+  document.querySelectorAll("[data-status]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const feedback = document.getElementById("contractor-status-feedback");
+      feedback.textContent = "";
+      try {
+        await FixHub.sendJson("/api/jobs/{{ job.id }}", "PATCH", { status: button.dataset.status });
+        refresh();
+      } catch (error) {
+        feedback.textContent = error.message;
+      }
+    });
+  });
+</script>
+{% endblock %}

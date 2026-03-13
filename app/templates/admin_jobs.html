@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Admin Job List | FixHub{% endblock %}
+{% block content %}
+<section class="panel">
+  <div class="panel-header">
+    <div>
+      <p class="eyebrow">Admin</p>
+      <h1>All jobs</h1>
+    </div>
+    <p class="muted">Assign contractors and keep the timeline moving.</p>
+  </div>
+
+  <div class="stats-grid">
+    <div class="stat">
+      <strong>{{ counts.total }}</strong>
+      <span>Total jobs</span>
+    </div>
+    <div class="stat">
+      <strong>{{ counts.new }}</strong>
+      <span>New</span>
+    </div>
+    <div class="stat">
+      <strong>{{ counts.assigned }}</strong>
+      <span>Assigned</span>
+    </div>
+    <div class="stat">
+      <strong>{{ counts.in_progress }}</strong>
+      <span>In progress</span>
+    </div>
+    <div class="stat">
+      <strong>{{ counts.completed }}</strong>
+      <span>Completed</span>
+    </div>
+  </div>
+</section>
+
+<section class="panel">
+  {% if jobs %}
+  <div class="job-grid">
+    {% for job in jobs %}
+    <a class="job-card" href="/admin/jobs/{{ job.id }}">
+      <span class="status-pill">{{ job.status_label }}</span>
+      <h3>{{ job.title }}</h3>
+      <p class="muted">Resident: {{ job.created_by_name }}</p>
+      <p>{{ job.location }}</p>
+      <p class="muted">Contractor: {{ job.assigned_org_name or "Unassigned" }}</p>
+    </a>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="empty-state">No jobs yet.</p>
+  {% endif %}
+</section>
+{% endblock %}

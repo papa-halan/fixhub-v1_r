@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Report Issue | FixHub{% endblock %}
+{% block content %}
+<section class="hero">
+  <div>
+    <p class="eyebrow">Resident</p>
+    <h1>Report an issue</h1>
+    <p>Keep the report short and concrete. FixHub will turn it into a shared job timeline that everyone can follow.</p>
+  </div>
+  <div class="panel">
+    <h2>What happens next</h2>
+    <p class="muted">You create the job. Admin assigns a contractor. The contractor adds updates. You watch the same event log the whole way through.</p>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-header">
+    <h2>Create Job</h2>
+    <p>Every new job starts with a single event: Report created.</p>
+  </div>
+  <form id="report-form" class="form-grid">
+    <label>
+      Title
+      <input type="text" name="title" placeholder="Leaking bathroom tap" required>
+    </label>
+    <label>
+      Location
+      <input type="text" name="location" placeholder="Block A, Room 14" required>
+    </label>
+    <label>
+      Description
+      <textarea name="description" placeholder="Water is dripping steadily under the sink." required></textarea>
+    </label>
+    <div class="actions">
+      <button class="button" type="submit">Submit issue</button>
+    </div>
+    <p class="feedback" data-feedback></p>
+  </form>
+</section>
+
+<script>
+  FixHub.wireJsonForm(document.getElementById("report-form"), async (formData) => {
+    const job = await FixHub.sendJson("/api/jobs", "POST", {
+      title: formData.get("title"),
+      location: formData.get("location"),
+      description: formData.get("description"),
+    });
+    window.location.href = `/resident/jobs/${job.id}`;
+  });
+</script>
+{% endblock %}

@@ -1,55 +1,77 @@
-# FixHub v1 - Maintenance Coordination MVP
+# FixHub MVP
 
-| Metadata | Value |
-| --- | --- |
-| Docs version | 0.2.0 |
-| Status | Active |
-| Owner | Project maintainer |
-| Reviewers | Docs maintainer; project maintainer |
-| Last updated | 2026-03-13 |
-| Review cadence | On change and quarterly |
+FixHub is a small maintenance-log app built around two entities: `jobs` and `events`.
 
-This repository currently implements the data/model and service workflow for a maintenance coordination MVP (resident -> staff dispatch -> contractor execution), with event and audit tracking.
+The live concept is simple:
+- residents create jobs
+- admins assign contractor organisations
+- contractors add updates and complete work
+- everyone reads the same event timeline
 
-## Current Project State (Implemented)
+## Scope
 
-- PostgreSQL schema and Alembic migrations for the MVP domain.
-- SQLAlchemy models for organisations, residences, units, users, maintenance requests, work orders, routing rules, domain events, integration jobs, and audit entries.
-- Transaction-scoped workflow service in `app/services/maintenance_coordination.py`.
-- Supporting services for policy checks, event append/integration jobs, routing, auth, and password hashing.
-- Seed and smoke-test scripts (`scripts/seed_mvp.py`, `scripts/smoke_test_mvp.py`).
-- Unit tests for auth, events, maintenance coordination, policies, and password handling.
+Database tables:
+- `users`
+- `organisations`
+- `jobs`
+- `events`
 
-Not implemented as source code in this repository:
-- Runnable HTTP API entrypoint and route modules. `app/main.py` is intentionally empty; only cached route bytecode exists under `app/api/**/__pycache__`.
+API routes:
+- `GET /api/me`
+- `POST /api/jobs`
+- `GET /api/jobs`
+- `GET /api/jobs/{job_id}`
+- `PATCH /api/jobs/{job_id}`
+- `GET /api/jobs/{job_id}/events`
+- `POST /api/jobs/{job_id}/events`
 
-## Documentation Structure
+Pages:
+- `/resident/report`
+- `/resident/jobs`
+- `/resident/jobs/{job_id}`
+- `/admin/jobs`
+- `/admin/jobs/{job_id}`
+- `/contractor/jobs`
+- `/contractor/jobs/{job_id}`
 
-- [`docs/README.md`](docs/README.md): documentation map, conventions, and review rules.
-- [`docs/CHANGELOG.md`](docs/CHANGELOG.md): versioned documentation changelog.
-- [`docs/adr/README.md`](docs/adr/README.md): ADR index for core model choices already implemented.
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md): implemented architecture and boundaries.
-- [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md): local setup, validation commands, and documentation process guidance.
-- [`docs/SECURITY.md`](docs/SECURITY.md): current security posture and known production gaps.
-- [`docs/schema_student_living_assessment.md`](docs/schema_student_living_assessment.md): resident workflow schema/service assessment.
+## Demo users
 
-## Documentation Practice Check (SD Standards)
+The app seeds three users on startup:
+- `resident@fixhub.test`
+- `admin@fixhub.test`
+- `contractor@fixhub.test`
 
-Current documentation now follows these baseline software-development documentation practices:
-- Explicit separation of implemented behavior vs proposed improvements.
-- Versioned docs change tracking in `docs/CHANGELOG.md`.
-- ADR history for implemented model choices.
-- Owner/reviewer metadata and review cadence on each maintained document.
-- Clear ownership boundaries and known limitations.
-- Actionable TODO lists for forward work.
+In the browser, use the top-right switcher to jump between them.
 
-## TODO (Proposed Improvements)
+For API calls, set `X-User-Email` to one of those addresses.
 
-- TODO: Add an API contract document once HTTP routes are restored as source files.
-- TODO: Add a docs template for new design notes, runbooks, and assessments.
-- TODO: Automate reminders for quarterly document review dates.
+## Local run
 
-## Documentation Change Log
+Quick smoke run with SQLite:
 
-- 2026-03-13 15:52:00 +11:00 (Australia/Sydney): Added ADR history, versioned docs changelog, and owner/reviewer metadata across the docs set.
-- 2026-03-13 15:21:56 +11:00 (Australia/Sydney): Refactored README and docs structure to improve clarity, separated current implementation from proposals, added TODO tracking and SD-practice review notes.
+```powershell
+pip install -e .[dev]
+uvicorn app.main:app --reload
+```
+
+Production-style run with PostgreSQL:
+
+```powershell
+$env:DATABASE_URL = "postgresql+psycopg://postgres:postgres@localhost:5432/fixhub"
+alembic upgrade head
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+## Docker
+
+```powershell
+docker compose up --build
+```
+
+That starts PostgreSQL plus the backend on port `8000`.
+
+## Notes
+
+- The app auto-seeds demo organisations and users.
+- The UI is server-rendered and reuses one `EventTimeline` partial across roles.
+- Authentication is intentionally lightweight for the demo: cookie switching in the UI, `X-User-Email` for API use.

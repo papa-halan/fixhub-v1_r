@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}My Reports | FixHub{% endblock %}
+{% block content %}
+<section class="panel">
+  <div class="panel-header">
+    <div>
+      <p class="eyebrow">Resident</p>
+      <h1>My reports</h1>
+    </div>
+    <a class="button" href="/resident/report">New report</a>
+  </div>
+
+  {% if jobs %}
+  <div class="job-grid">
+    {% for job in jobs %}
+    <a class="job-card" href="/resident/jobs/{{ job.id }}">
+      <span class="status-pill">{{ job.status_label }}</span>
+      <h3>{{ job.title }}</h3>
+      <p class="muted">{{ job.location }}</p>
+      <p>{{ job.description }}</p>
+      <p class="muted">Assigned to: {{ job.assigned_org_name or "Waiting for admin" }}</p>
+    </a>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="empty-state">No reports yet. Start with the report form.</p>
+  {% endif %}
+</section>
+{% endblock %}

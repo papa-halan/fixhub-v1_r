@@ -1,49 +1,14 @@
 from app.models.base import Base
-from app.models.enums import (
-    EVENT_INTEGRATION_COMPLETED,
-    EVENT_INTEGRATION_FAILED,
-    EVENT_INTEGRATION_REQUESTED,
-    EVENT_MAINTENANCE_REQUEST_SUBMITTED,
-    EVENT_TYPES,
-    EVENT_WORK_ORDER_CREATED,
-    EVENT_WORK_ORDER_STATUS_CHANGED,
-    IntegrationJobStatus,
-    UserRole,
-    WorkOrderStatus,
-)
-from app.models.mvp import (
-    AuditEntry,
-    DomainEvent,
-    IntegrationJob,
-    MaintenanceRequest,
-    Organisation,
-    Residence,
-    RoutingRule,
-    Unit,
-    User,
-    WorkOrder,
-)
+from app.models.enums import JobStatus, OrganisationType, UserRole
+from app.models.mvp import Event, Job, Organisation, User
 
 __all__ = [
-    "AuditEntry",
     "Base",
-    "DomainEvent",
-    "EVENT_INTEGRATION_COMPLETED",
-    "EVENT_INTEGRATION_FAILED",
-    "EVENT_INTEGRATION_REQUESTED",
-    "EVENT_MAINTENANCE_REQUEST_SUBMITTED",
-    "EVENT_TYPES",
-    "EVENT_WORK_ORDER_CREATED",
-    "EVENT_WORK_ORDER_STATUS_CHANGED",
-    "IntegrationJob",
-    "IntegrationJobStatus",
-    "MaintenanceRequest",
+    "Event",
+    "Job",
+    "JobStatus",
     "Organisation",
-    "Residence",
-    "RoutingRule",
-    "Unit",
+    "OrganisationType",
     "User",
     "UserRole",
-    "WorkOrder",
-    "WorkOrderStatus",
 ]

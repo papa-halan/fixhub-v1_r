@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Contractor Job List | FixHub{% endblock %}
+{% block content %}
+<section class="panel">
+  <div class="panel-header">
+    <div>
+      <p class="eyebrow">Contractor</p>
+      <h1>Assigned jobs</h1>
+    </div>
+    <p class="muted">Pick a job, post a note, and move the status when work actually changes.</p>
+  </div>
+
+  {% if jobs %}
+  <div class="job-grid">
+    {% for job in jobs %}
+    <a class="job-card" href="/contractor/jobs/{{ job.id }}">
+      <span class="status-pill">{{ job.status_label }}</span>
+      <h3>{{ job.title }}</h3>
+      <p>{{ job.location }}</p>
+      <p class="muted">{{ job.description }}</p>
+    </a>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="empty-state">No jobs are assigned to your organisation yet.</p>
+  {% endif %}
+</section>
+{% endblock %}
