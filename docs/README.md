@@ -1,6 +1,6 @@
 # Documentation Index
 
-Last updated: `2026-03-13 23:28:11 +11:00`
+Last updated: `2026-03-15 17:30:56 +11:00`
 
 ## Purpose
 
@@ -25,6 +25,7 @@ This folder stores project documentation for implemented behavior and ongoing do
 - Separation of current-state vs proposed-state: pass (`Implemented` vs `TODO` sections).
 - Portability/readability for sharing with other users: pass (relative links + index).
 - Verification evidence attached to claims: partial (runtime tests blocked in this environment; code-level evidence used).
+- README diagram coverage for current implementation: pass (ER + flow + architecture + state machine documented with Mermaid).
 
 ## Suggestions For Development Documentation
 
@@ -43,3 +44,4 @@ This folder stores project documentation for implemented behavior and ongoing do
 - current process now follows baseline SD practice for traceability and structure, but review cadence is still manual.
 - evidence quality is acceptable for code-level validation, but should include green runtime checks in normal environments.
 - proposed-vs-implemented separation is now explicit, reducing requirement ambiguity for reviewers.
+- diagram updates are now captured as first-class documentation changes, but should eventually move to dedicated architecture docs under `docs/` for long-term maintainability.

@@ -1,0 +1,63 @@
+from __future__ import annotations
+
+import uuid
+
+from fastapi import APIRouter, Depends, Request
+from fastapi.responses import HTMLResponse
+from sqlalchemy.orm import Session
+
+from app.api.deps import (
+    build_job_counts,
+    get_current_user,
+    get_session,
+    list_contractor_organisations,
+    render_page,
+    require_role,
+    serialize_event,
+    serialize_job,
+    visible_events,
+    visible_job,
+    visible_jobs,
+)
+from app.models import User, UserRole
+
+
+router = APIRouter(prefix="/admin")
+
+
+@router.get("/jobs", response_class=HTMLResponse, include_in_schema=False)
+def admin_jobs_page(
+    request: Request,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    require_role(current_user, UserRole.admin)
+    jobs = [serialize_job(job) for job in visible_jobs(session, current_user)]
+    return render_page(
+        request=request,
+        session=session,
+        current_user=current_user,
+        template_name="admin_jobs.html",
+        jobs=jobs,
+        counts=build_job_counts(jobs),
+    )
+
+
+@router.get("/jobs/{job_id}", response_class=HTMLResponse, include_in_schema=False)
+def admin_job_page(
+    job_id: uuid.UUID,
+    request: Request,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    require_role(current_user, UserRole.admin)
+    job = visible_job(session, current_user, job_id)
+    return render_page(
+        request=request,
+        session=session,
+        current_user=current_user,
+        template_name="admin_job.html",
+        job=serialize_job(job),
+        events=[serialize_event(event) for event in visible_events(session, job_id)],
+        contractor_orgs=list_contractor_organisations(session),
+    )

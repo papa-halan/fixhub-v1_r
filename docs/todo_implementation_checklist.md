@@ -1,6 +1,6 @@
 # TODO Implementation Checklist
 
-Last updated: `2026-03-13 23:28:11 +11:00`
+Last updated: `2026-03-15 17:30:56 +11:00`
 
 Use this checklist to implement the current proposed TODO backlog in a controlled order.
 
@@ -103,6 +103,7 @@ Acceptance checks:
 - [ ] Confirm docs reflect implemented state only.
 - [ ] Move remaining unimplemented items back into TODO sections.
 - [ ] Update `docs/CHANGELOG.md` with timestamped release notes.
+- [x] Sync README Mermaid diagrams to currently implemented schema/routes/lifecycle only (no speculative states).
 
 ## Definition of Done
 

@@ -34,8 +34,8 @@
       <form id="assign-form" class="form-grid" method="post">
         <label>
           Contractor organisation
-          <select name="assigned_org_id" required>
-            <option value="">Choose contractor</option>
+          <select name="assigned_org_id">
+            <option value="">No contractor assigned</option>
             {% for organisation in contractor_orgs %}
             <option value="{{ organisation.id }}" {% if organisation.id == job.assigned_org_id %}selected{% endif %}>{{ organisation.name }}</option>
             {% endfor %}
@@ -87,8 +87,9 @@
   const reloadPage = () => window.location.reload();
 
   FixHub.wireJsonForm(document.getElementById("assign-form"), async (formData) => {
+    const assignedOrgId = formData.get("assigned_org_id");
     await FixHub.sendJson("/api/jobs/{{ job.id }}", "PATCH", {
-      assigned_org_id: formData.get("assigned_org_id"),
+      assigned_org_id: assignedOrgId === "" ? null : assignedOrgId,
     });
     reloadPage();
   });

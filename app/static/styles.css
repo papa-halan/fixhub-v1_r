@@ -168,6 +168,10 @@ a {
   gap: 1rem;
 }
 
+.landing-hero {
+  margin-top: 3rem;
+}
+
 .eyebrow {
   margin: 0 0 0.65rem;
   color: var(--accent-dark);

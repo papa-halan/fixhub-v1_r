@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FixHub Demo Access</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <main class="page-shell">
+    <section class="hero landing-hero">
+      <div class="panel">
+        <p class="eyebrow">Demo Access</p>
+        <h1>Choose a demo user to continue.</h1>
+        <p class="muted">
+          Protected resident, admin, and contractor pages now require an explicit sign-in.
+          Pick one of the seeded demo users below to enter the app.
+        </p>
+        {% if invalid_user %}
+        <p class="feedback">Your saved demo session is no longer valid. Choose a user to continue.</p>
+        {% endif %}
+      </div>
+
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <p class="eyebrow">Available Users</p>
+            <h2>Sign in as</h2>
+          </div>
+        </div>
+
+        <div class="switcher-links">
+          {% for demo in demo_users %}
+          <a class="switcher-link" href="/switch-user?email={{ demo.email }}&next={{ demo.home_path }}">
+            {{ demo.label }}
+          </a>
+          {% endfor %}
+        </div>
+
+        <p class="form-helper muted">API requests still require the <code>X-User-Email</code> header.</p>
+      </section>
+    </section>
+  </main>
+</body>
+</html>

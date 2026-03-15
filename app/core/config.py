@@ -15,7 +15,6 @@ def default_database_url() -> str:
 class Settings:
     app_name: str = "FixHub"
     database_url: str = default_database_url()
-    default_user_email: str = os.getenv("FIXHUB_DEFAULT_USER", "resident@fixhub.test")
 
 
 settings = Settings()
