@@ -1,5 +1,88 @@
 # Documentation Changelog
 
+## Document Metadata
+
+- Owner: `student-living-platform`
+- Reviewer: `schema-test-automation`
+- Status: `active`
+
+## [0.4.0] - 2026-03-19 17:20:00 +11:00
+
+### Added
+- documentation for direct contractor dispatch via `assigned_contractor_user_id`
+- documentation for structured event metadata: `event_type`, `responsibility_stage`, and `owner_scope`
+- documentation for Student Living operations sub-roles and organisation hierarchy
+- Alembic migration note for `20260319_0005_operational_workflow_refactor.py`
+
+### Changed
+- refreshed `README.md` with updated ER diagram, simplified business state diagram, guard-condition table, and API examples
+- refreshed `docs/README.md`, `docs/architecture.md`, and `docs/schema_student_living_assessment.md` to reflect the refined lifecycle and assignment semantics
+
+### Notes
+- runtime verification succeeded in this environment with `python -m pytest tests\test_schema.py tests\test_app.py`
+- result: `20 passed`
+
+## [0.3.9] - 2026-03-19 14:35:04 +11:00
+
+### Added
+- local docs freshness quality gate test: `tests/test_docs_freshness.py`.
+
+### Changed
+- updated `docs/documentation_sop.md` with docs freshness gate rules and intentional bypass instructions.
+- updated `docs/README.md` to reflect local docs freshness enforcement status and remaining CI TODO.
+- updated `docs/todo_implementation_checklist.md` to mark B4 docs freshness gate tasks complete.
+
+### Notes
+- commit scan since last run (`2026-03-19T03:24:08.646Z`) found no new commits.
+- latest commit in the 24h scan window remains `dcef84a5c27b2f611e9f0ccfca4777109e4c7d87`.
+- runtime command execution remains blocked (`python`/`py` unavailable; `.venv\\Scripts\\python.exe` access denied), so this run is static/code-evidence verified.
+
+## [0.3.8] - 2026-03-19 14:26:43 +11:00
+
+### Added
+- `docs/architecture.md` with Mermaid architecture flow for current pages, routes, entities, and event flow.
+- `docs/documentation_sop.md` defining mandatory doc update triggers and changelog/verification recording rules.
+- `docs/known_issues.md` documenting current Python runtime execution blockers and mitigation paths.
+
+### Changed
+- updated `README.md` diagrams (ER, flow, state machine) to match implemented branch lifecycle and event metadata fields.
+- updated `docs/schema_student_living_assessment.md` baseline to reflect implemented branch statuses and event handoff fields.
+- updated `docs/todo_implementation_checklist.md` to mark completed A1 and documentation-track items implemented in repository docs.
+- updated `docs/README.md` to add metadata convention and links for newly added documentation files.
+- updated `.gitignore` to include `.pytest-tmp-codex/` and keep transient test artifacts out of tracked commits.
+
+### Notes
+- commit scan since last run found no new commits after `2026-03-19T03:00:55.139Z`; latest recent commit reviewed: `dcef84a5c27b2f611e9f0ccfca4777109e4c7d87`.
+- runtime command execution remained blocked in this environment (`python`/`py` unavailable; `.venv\\Scripts\\python.exe` denied execution), so this run is static/code-evidence verified.
+
+## [0.3.7] - 2026-03-19 14:13:16 +11:00
+
+### Added
+- branch-state lifecycle support in code: `on_hold`, `blocked`, `cancelled`, `reopened`.
+- structured transition metadata fields in events: `reason_code` and `responsibility_owner`.
+- Alembic migration `20260319_0003_branch_status_and_handoff_metadata.py` for status/metadata rollout.
+
+### Changed
+- guarded status transition logic now requires `reason_code` and `responsibility_owner` for branch transitions.
+- API schema/serialization now surfaces transition metadata for timeline/event consumers.
+- timeline UI now shows reason and owner when branch-state metadata is present.
+- updated schema/app tests to validate guarded transition behavior and new enum/field surfaces.
+
+### Notes
+- runtime verification succeeded in this environment: `45 passed` across `tests/test_schema.py` and `tests/test_app.py`.
+
+## [0.3.6] - 2026-03-19 13:56:41 +11:00
+
+### Changed
+- updated `README.md` Mermaid diagrams only (architecture and state machine) to reflect current implemented route flow and lifecycle behavior.
+- refreshed `docs/README.md` timestamp, structure wording, SD-practice sanity checks, and documentation-process feedback.
+- refreshed `docs/schema_student_living_assessment.md` top date/runtime verification status and appended a timestamped `refactor-docs-and-readme-md` run log.
+- refreshed `docs/todo_implementation_checklist.md` timestamp and marked documentation-sync checklist items completed for this run.
+
+### Notes
+- this run is documentation-only and remains aligned to currently implemented code/schema behavior.
+- runtime test execution remains blocked in this environment (`python` unavailable and `.venv\\Scripts\\python.exe` launch denied).
+
 ## [0.3.5] - 2026-03-15 18:31:34 +11:00
 
 ### Added

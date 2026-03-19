@@ -1,13 +1,13 @@
 {% extends "base.html" %}
-{% block title %}Admin Job List | FixHub{% endblock %}
+{% block title %}Operations Job List | FixHub{% endblock %}
 {% block content %}
 <section class="panel">
   <div class="panel-header">
     <div>
-      <p class="eyebrow">Admin</p>
+      <p class="eyebrow">Operations</p>
       <h1>All jobs</h1>
     </div>
-    <p class="muted">Assign contractors and keep the timeline moving.</p>
+    <p class="muted">Coordinate triage, scheduling, and accountable handoffs.</p>
   </div>
 
   <div class="stats-grid">
@@ -24,12 +24,16 @@
       <span>Assigned</span>
     </div>
     <div class="stat">
-      <strong>{{ counts.in_progress }}</strong>
-      <span>In progress</span>
+      <strong>{{ counts.triaged }}</strong>
+      <span>Triaged</span>
     </div>
     <div class="stat">
-      <strong>{{ counts.completed }}</strong>
-      <span>Completed</span>
+      <strong>{{ counts.scheduled }}</strong>
+      <span>Scheduled</span>
+    </div>
+    <div class="stat">
+      <strong>{{ counts.in_progress }}</strong>
+      <span>In progress</span>
     </div>
   </div>
 </section>
@@ -42,8 +46,8 @@
       <span class="status-pill">{{ job.status_label }}</span>
       <h3>{{ job.title }}</h3>
       <p class="muted">Resident: {{ job.created_by_name }}</p>
-      <p>{{ job.asset_name or "Asset not captured" }} · {{ job.location }}</p>
-      <p class="muted">Contractor: {{ job.assigned_org_name or "Unassigned" }}</p>
+      <p>{{ job.asset_name or "Asset not captured" }} - {{ job.location }}</p>
+      <p class="muted">Dispatch: {{ job.assignee_label or "Unassigned" }}</p>
     </a>
     {% endfor %}
   </div>

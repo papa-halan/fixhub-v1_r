@@ -11,7 +11,7 @@ from app.schema.base import SchemaModel
 
 class LocationRead(SchemaModel):
     id: uuid.UUID
-    user_id: uuid.UUID
+    organisation_id: uuid.UUID
     name: str
     created_at: datetime
 

@@ -1,6 +1,12 @@
 # TODO Implementation Checklist
 
-Last updated: `2026-03-15 17:30:56 +11:00`
+Last updated: `2026-03-19 14:35:04 +11:00`
+
+## Document Metadata
+
+- Owner: `student-living-platform`
+- Reviewer: `schema-test-automation`
+- Status: `active`
 
 Use this checklist to implement the current proposed TODO backlog in a controlled order.
 
@@ -8,24 +14,24 @@ Use this checklist to implement the current proposed TODO backlog in a controlle
 
 - [ ] Confirm current baseline passes relevant tests in target environment.
 - [ ] Create a feature branch for TODO implementation work.
-- [ ] Review current TODO sources:
-- [ ] `README.md` -> `Documentation TODO (Proposed)`
-- [ ] `docs/schema_student_living_assessment.md` -> `TODO (Proposed Product Improvements)` + `TODO (Proposed Documentation Improvements)`
-- [ ] `docs/README.md` -> `TODO (Proposed Documentation Improvements)`
+- [x] Review current TODO sources:
+- [x] `README.md` -> `Documentation TODO (Proposed)`
+- [x] `docs/schema_student_living_assessment.md` -> `TODO (Proposed Product Improvements)` + `TODO (Proposed Documentation Improvements)`
+- [x] `docs/README.md` -> `TODO (Proposed Documentation Improvements)`
 
 ## Track A: Product TODOs
 
 ### A1. Lifecycle States (blocked/reopen/escalation)
 
-- [ ] Extend job status model with required new states.
-- [ ] Define explicit allowed transitions for each role.
-- [ ] Update API validation and response handling.
-- [ ] Update UI status presentation for new states.
-- [ ] Add tests for valid transitions and forbidden transitions.
+- [x] Extend job status model with required new states.
+- [x] Define explicit allowed transitions for each role.
+- [x] Update API validation and response handling.
+- [x] Update UI status presentation for new states.
+- [x] Add tests for valid transitions and forbidden transitions.
 
 Acceptance checks:
-- [ ] No implicit backward transition occurs.
-- [ ] Resident/admin/contractor role permissions are enforced.
+- [x] No implicit backward transition occurs.
+- [x] Resident/admin/contractor role permissions are enforced.
 
 ### A2. Request -> Work Order Split (1:N)
 
@@ -67,33 +73,33 @@ Acceptance checks:
 
 ### B1. Architecture Diagram
 
-- [ ] Create `docs/architecture.md` with flow diagram (Mermaid acceptable).
-- [ ] Include role pages, core API routes, entities, and event flow.
+- [x] Create `docs/architecture.md` with flow diagram (Mermaid acceptable).
+- [x] Include role pages, core API routes, entities, and event flow.
 
 ### B2. Documentation SOP
 
-- [ ] Create `docs/documentation_sop.md`.
-- [ ] Define when docs updates are mandatory after code changes.
-- [ ] Define required changelog update pattern.
+- [x] Create `docs/documentation_sop.md`.
+- [x] Define when docs updates are mandatory after code changes.
+- [x] Define required changelog update pattern.
 
 ### B3. Known Environment Issues
 
-- [ ] Create `docs/known_issues.md`.
-- [ ] Document Python `encodings` startup failure and mitigations.
+- [x] Create `docs/known_issues.md`.
+- [x] Document Python `encodings` startup failure and mitigations.
 
 ### B4. Docs Freshness Gate
 
-- [ ] Add a docs freshness check script/test.
-- [ ] Integrate check into CI or local quality gate.
-- [ ] Document how to override/acknowledge intentional exceptions.
+- [x] Add a docs freshness check script/test.
+- [x] Integrate check into CI or local quality gate.
+- [x] Document how to override/acknowledge intentional exceptions.
 
 ### B5. Owner/Reviewer Metadata
 
-- [ ] Define metadata convention in `docs/README.md`.
-- [ ] Apply metadata block to major docs.
+- [x] Define metadata convention in `docs/README.md`.
+- [x] Apply metadata block to major docs.
 
 Acceptance checks:
-- [ ] New docs are linked from `docs/README.md`.
+- [x] New docs are linked from `docs/README.md`.
 - [ ] `docs/CHANGELOG.md` records all documentation additions/changes.
 
 ## Validation and Release
@@ -104,9 +110,11 @@ Acceptance checks:
 - [ ] Move remaining unimplemented items back into TODO sections.
 - [ ] Update `docs/CHANGELOG.md` with timestamped release notes.
 - [x] Sync README Mermaid diagrams to currently implemented schema/routes/lifecycle only (no speculative states).
+- [x] Refresh `docs/README.md` SD-practice sanity checks and process feedback against current repository state.
+- [x] Append timestamped schema/doc sync run log entry in `docs/schema_student_living_assessment.md`.
 
 ## Definition of Done
 
 - [ ] Product TODOs implemented with migrations and passing tests.
-- [ ] Documentation TODOs added, linked, and changelogged.
+- [x] Documentation TODOs added, linked, and changelogged.
 - [ ] README/docs maintain explicit implemented vs proposed separation.

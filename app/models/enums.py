@@ -6,6 +6,9 @@ from enum import Enum
 class UserRole(str, Enum):
     resident = "resident"
     admin = "admin"
+    reception_admin = "reception_admin"
+    triage_officer = "triage_officer"
+    coordinator = "coordinator"
     contractor = "contractor"
 
 
@@ -14,8 +17,52 @@ class OrganisationType(str, Enum):
     contractor = "contractor"
 
 
+class ContractorMode(str, Enum):
+    maintenance_team = "maintenance_team"
+    external_contractor = "external_contractor"
+
+
 class JobStatus(str, Enum):
     new = "new"
     assigned = "assigned"
+    triaged = "triaged"
+    scheduled = "scheduled"
     in_progress = "in_progress"
+    on_hold = "on_hold"
+    blocked = "blocked"
     completed = "completed"
+    cancelled = "cancelled"
+    reopened = "reopened"
+    follow_up_scheduled = "follow_up_scheduled"
+    escalated = "escalated"
+
+
+class EventType(str, Enum):
+    report_created = "report_created"
+    note = "note"
+    assignment = "assignment"
+    status_change = "status_change"
+    schedule = "schedule"
+    escalation = "escalation"
+    completion = "completion"
+    follow_up = "follow_up"
+
+
+class ResponsibilityStage(str, Enum):
+    reception = "reception"
+    triage = "triage"
+    coordination = "coordination"
+    execution = "execution"
+
+
+class OwnerScope(str, Enum):
+    organisation = "organisation"
+    user = "user"
+
+
+class ResponsibilityOwner(str, Enum):
+    reception_admin = "reception_admin"
+    triage_officer = "triage_officer"
+    coordinator = "coordinator"
+    contractor = "contractor"
+    resident = "resident"

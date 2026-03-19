@@ -5,7 +5,7 @@ from datetime import datetime
 
 from pydantic import ValidationInfo, field_validator
 
-from app.models import JobStatus
+from app.models import JobStatus, OwnerScope, ResponsibilityStage
 from app.schema.base import SchemaModel, strip_non_blank
 
 
@@ -30,7 +30,18 @@ class JobCreate(SchemaModel):
 
 class JobUpdate(SchemaModel):
     assigned_org_id: uuid.UUID | None = None
+    assigned_contractor_user_id: uuid.UUID | None = None
     status: JobStatus | None = None
+    reason_code: str | None = None
+    responsibility_stage: ResponsibilityStage | None = None
+    owner_scope: OwnerScope | None = None
+
+    @field_validator("reason_code")
+    @classmethod
+    def validate_reason_code(cls, value: str | None, info: ValidationInfo) -> str | None:
+        if value is None:
+            return None
+        return strip_non_blank(value, info.field_name)
 
 
 class JobRead(SchemaModel):
@@ -38,7 +49,7 @@ class JobRead(SchemaModel):
     title: str
     description: str
     location: str
-    location_id: uuid.UUID | None = None
+    location_id: uuid.UUID
     asset_id: uuid.UUID | None = None
     asset_name: str | None = None
     status: JobStatus
@@ -47,5 +58,9 @@ class JobRead(SchemaModel):
     created_by_name: str
     assigned_org_id: uuid.UUID | None = None
     assigned_org_name: str | None = None
+    assigned_contractor_user_id: uuid.UUID | None = None
+    assigned_contractor_name: str | None = None
+    assignee_scope: OwnerScope | None = None
+    assignee_label: str | None = None
     created_at: datetime
     updated_at: datetime

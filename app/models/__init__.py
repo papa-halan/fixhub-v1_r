@@ -1,6 +1,15 @@
 from app.models.asset import Asset
 from app.models.base import Base
-from app.models.enums import JobStatus, OrganisationType, UserRole
+from app.models.enums import (
+    ContractorMode,
+    EventType,
+    JobStatus,
+    OrganisationType,
+    OwnerScope,
+    ResponsibilityOwner,
+    ResponsibilityStage,
+    UserRole,
+)
 from app.models.event import Event
 from app.models.job import Job
 from app.models.location import Location
@@ -10,12 +19,17 @@ from app.models.user import User
 __all__ = [
     "Asset",
     "Base",
+    "ContractorMode",
     "Event",
+    "EventType",
     "Job",
     "JobStatus",
     "Location",
     "Organisation",
     "OrganisationType",
+    "OwnerScope",
+    "ResponsibilityOwner",
+    "ResponsibilityStage",
     "User",
     "UserRole",
 ]

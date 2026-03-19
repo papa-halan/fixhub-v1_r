@@ -6,7 +6,15 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Organisation, OrganisationType, User, UserRole
+from app.models import ContractorMode, Organisation, OrganisationType, User, UserRole
+
+
+@dataclass(frozen=True)
+class DemoOrganisation:
+    name: str
+    type: OrganisationType
+    parent_name: str | None = None
+    contractor_mode: ContractorMode | None = None
 
 
 @dataclass(frozen=True)
@@ -15,7 +23,29 @@ class DemoUser:
     email: str
     role: UserRole
     organisation_name: str | None = None
-    organisation_type: OrganisationType | None = None
+
+
+DEMO_ORGANISATIONS: tuple[DemoOrganisation, ...] = (
+    DemoOrganisation(
+        name="University of Newcastle",
+        type=OrganisationType.university,
+    ),
+    DemoOrganisation(
+        name="Student Living",
+        type=OrganisationType.university,
+        parent_name="University of Newcastle",
+    ),
+    DemoOrganisation(
+        name="Newcastle Plumbing",
+        type=OrganisationType.contractor,
+        contractor_mode=ContractorMode.external_contractor,
+    ),
+    DemoOrganisation(
+        name="Campus Maintenance",
+        type=OrganisationType.contractor,
+        contractor_mode=ContractorMode.maintenance_team,
+    ),
+)
 
 
 DEMO_USERS: tuple[DemoUser, ...] = (
@@ -24,21 +54,47 @@ DEMO_USERS: tuple[DemoUser, ...] = (
         email="resident@fixhub.test",
         role=UserRole.resident,
         organisation_name="Student Living",
-        organisation_type=OrganisationType.university,
     ),
     DemoUser(
         name="Avery Admin",
         email="admin@fixhub.test",
         role=UserRole.admin,
         organisation_name="Student Living",
-        organisation_type=OrganisationType.university,
+    ),
+    DemoUser(
+        name="Remy Reception",
+        email="reception@fixhub.test",
+        role=UserRole.reception_admin,
+        organisation_name="Student Living",
+    ),
+    DemoUser(
+        name="Taylor Triage",
+        email="triage@fixhub.test",
+        role=UserRole.triage_officer,
+        organisation_name="Student Living",
+    ),
+    DemoUser(
+        name="Cory Coordinator",
+        email="coordinator@fixhub.test",
+        role=UserRole.coordinator,
+        organisation_name="Student Living",
     ),
     DemoUser(
         name="Devon Contractor",
         email="contractor@fixhub.test",
         role=UserRole.contractor,
         organisation_name="Newcastle Plumbing",
-        organisation_type=OrganisationType.contractor,
+    ),
+    DemoUser(
+        name="Maddie Maintenance",
+        email="maintenance.contractor@fixhub.test",
+        role=UserRole.contractor,
+        organisation_name="Campus Maintenance",
+    ),
+    DemoUser(
+        name="Indy Independent",
+        email="independent.contractor@fixhub.test",
+        role=UserRole.contractor,
     ),
 )
 
@@ -46,24 +102,28 @@ DEMO_USERS: tuple[DemoUser, ...] = (
 def ensure_demo_data(session: Session) -> None:
     org_cache: dict[str, Organisation] = {}
 
+    for demo_org in DEMO_ORGANISATIONS:
+        organisation = org_cache.get(demo_org.name)
+        if organisation is None:
+            organisation = session.scalar(
+                select(Organisation).where(Organisation.name == demo_org.name).limit(1)
+            )
+        if organisation is None:
+            organisation = Organisation(name=demo_org.name, type=demo_org.type)
+            session.add(organisation)
+            session.flush()
+        organisation.type = demo_org.type
+        organisation.contractor_mode = demo_org.contractor_mode
+        org_cache[demo_org.name] = organisation
+
+    for demo_org in DEMO_ORGANISATIONS:
+        organisation = org_cache[demo_org.name]
+        organisation.parent_org_id = (
+            org_cache[demo_org.parent_name].id if demo_org.parent_name is not None else None
+        )
+
     for demo in DEMO_USERS:
-        organisation: Organisation | None = None
-        if demo.organisation_name and demo.organisation_type:
-            organisation = org_cache.get(demo.organisation_name)
-            if organisation is None:
-                organisation = session.scalar(
-                    select(Organisation).where(Organisation.name == demo.organisation_name).limit(1)
-                )
-            if organisation is None:
-                organisation = Organisation(
-                    name=demo.organisation_name,
-                    type=demo.organisation_type,
-                )
-                session.add(organisation)
-                session.flush()
-            else:
-                organisation.type = demo.organisation_type
-            org_cache[demo.organisation_name] = organisation
+        organisation = org_cache.get(demo.organisation_name) if demo.organisation_name else None
 
         user = session.scalar(select(User).where(User.email == demo.email).limit(1))
         if user is None:

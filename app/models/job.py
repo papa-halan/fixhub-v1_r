@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Index, Text, func
+from sqlalchemy import CheckConstraint, DateTime, Enum, ForeignKey, Index, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, created_timestamp, uuid_pk
@@ -21,15 +21,20 @@ if TYPE_CHECKING:
 class Job(Base):
     __tablename__ = "jobs"
     __table_args__ = (
+        CheckConstraint(
+            "NOT (assigned_org_id IS NOT NULL AND assigned_contractor_user_id IS NOT NULL)",
+            name="ck_jobs_single_assignee",
+        ),
         Index("ix_jobs_created_by_created_at", "created_by", "created_at"),
         Index("ix_jobs_assigned_org_status", "assigned_org_id", "status"),
+        Index("ix_jobs_assigned_contractor_status", "assigned_contractor_user_id", "status"),
         Index("ix_jobs_location_asset", "location_id", "asset_id"),
     )
 
     id: Mapped[uuid.UUID] = uuid_pk()
     title: Mapped[str] = mapped_column(Text, nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)
-    location: Mapped[str] = mapped_column(Text, nullable=False)
+    location_snapshot: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[JobStatus] = mapped_column(
         Enum(JobStatus, name="job_status_enum", native_enum=False, validate_strings=True),
         nullable=False,
@@ -37,9 +42,9 @@ class Job(Base):
         server_default=JobStatus.new.value,
     )
     created_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
-    location_id: Mapped[uuid.UUID | None] = mapped_column(
+    location_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("locations.id"),
-        nullable=True,
+        nullable=False,
         index=True,
     )
     asset_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -49,6 +54,10 @@ class Job(Base):
     )
     assigned_org_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("organisations.id"),
+        nullable=True,
+    )
+    assigned_contractor_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id"),
         nullable=True,
     )
     created_at: Mapped[datetime] = created_timestamp()
@@ -63,7 +72,11 @@ class Job(Base):
         back_populates="created_jobs",
         foreign_keys=[created_by],
     )
-    location_record: Mapped[Location | None] = relationship(
+    assigned_contractor: Mapped[User | None] = relationship(
+        back_populates="direct_assigned_jobs",
+        foreign_keys=[assigned_contractor_user_id],
+    )
+    location: Mapped[Location] = relationship(
         back_populates="jobs",
         foreign_keys=[location_id],
     )

@@ -7,10 +7,12 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
 from app.api.deps import (
+    OPERATIONS_ROLES,
     build_job_counts,
     get_current_user,
     get_session,
     list_contractor_organisations,
+    list_contractor_users,
     render_page,
     require_role,
     serialize_event,
@@ -31,7 +33,7 @@ def admin_jobs_page(
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ):
-    require_role(current_user, UserRole.admin)
+    require_role(current_user, *OPERATIONS_ROLES)
     jobs = [serialize_job(job) for job in visible_jobs(session, current_user)]
     return render_page(
         request=request,
@@ -50,7 +52,7 @@ def admin_job_page(
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ):
-    require_role(current_user, UserRole.admin)
+    require_role(current_user, *OPERATIONS_ROLES)
     job = visible_job(session, current_user, job_id)
     return render_page(
         request=request,
@@ -60,4 +62,5 @@ def admin_job_page(
         job=serialize_job(job),
         events=[serialize_event(event) for event in visible_events(session, job_id)],
         contractor_orgs=list_contractor_organisations(session),
+        contractor_users=list_contractor_users(session),
     )

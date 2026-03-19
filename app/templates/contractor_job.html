@@ -12,6 +12,10 @@
           <strong>{{ job.status_label }}</strong>
         </div>
         <div class="meta-item">
+          <span>Dispatch</span>
+          <strong>{{ job.assignee_label or "Not assigned" }}</strong>
+        </div>
+        <div class="meta-item">
           <span>Location</span>
           <strong>{{ job.location }}</strong>
         </div>
@@ -29,10 +33,12 @@
     <section class="panel">
       <div class="panel-header">
         <h2>Progress controls</h2>
-        <p>Only change status when the work state changes.</p>
+        <p>Only change status when the execution state changes.</p>
       </div>
       <div class="actions">
         <button class="button secondary" data-status="in_progress" type="button">Start work</button>
+        <button class="button secondary" data-status="blocked" type="button">Mark blocked</button>
+        <button class="button secondary" data-status="on_hold" type="button">Put on hold</button>
         <button class="button secondary" data-status="completed" type="button">Mark completed</button>
       </div>
       <p class="feedback" id="contractor-status-feedback"></p>
@@ -46,9 +52,9 @@
       <form id="contractor-event-form" class="form-grid" method="post">
         <label>
           Message
-          <textarea name="message" placeholder="contractor confirmed tomorrow visit" required></textarea>
+          <textarea name="message" placeholder="parts ordered for Tuesday install" required></textarea>
         </label>
-        <p class="muted form-helper">Examples: contractor confirmed tomorrow visit, waiting on spare parts, inspection complete, resident granted access.</p>
+        <p class="muted form-helper">Examples: site attended, access denied at arrival, repair completed and tested.</p>
         <div class="actions">
           <button class="button" type="submit">Add update</button>
         </div>

@@ -1,12 +1,22 @@
 # FixHub MVP
 
-FixHub is a small maintenance-log app built around `jobs` and `events`, with a persistent location/asset catalog behind each report.
+FixHub is a maintenance workflow demo for a resident -> operations -> contractor lifecycle. The current model supports Student Living-style triage, scheduling, direct independent-contractor dispatch, organisation-backed contractor dispatch, and accountability metadata on timeline events.
 
-The live concept is simple:
-- residents create jobs
-- admins assign contractor organisations
-- contractors add updates and complete work
-- everyone reads the same event timeline
+## Current Workflow
+
+- residents create jobs with remembered `location` and `asset` context
+- operations users coordinate intake, triage, scheduling, escalation, and follow-up
+- contractors move work through execution states
+- everyone reads the same shared timeline, now with typed event metadata
+
+## Roles
+
+- `resident`
+- `admin`
+- `reception_admin`
+- `triage_officer`
+- `coordinator`
+- `contractor`
 
 ## Scope
 
@@ -18,7 +28,7 @@ Database tables:
 - `jobs`
 - `events`
 
-API routes:
+Core API routes:
 - `GET /api/me`
 - `POST /api/jobs`
 - `GET /api/jobs`
@@ -27,7 +37,7 @@ API routes:
 - `GET /api/jobs/{job_id}/events`
 - `POST /api/jobs/{job_id}/events`
 
-Pages:
+Server-rendered pages:
 - `/resident/report`
 - `/resident/jobs`
 - `/resident/jobs/{job_id}`
@@ -38,36 +48,22 @@ Pages:
 
 ## Code Layout
 
-- `app/models/`: SQLAlchemy models for database persistence.
-- `app/schema/`: Pydantic request/response models for the API contract.
-- `app/services/`: domain helpers for demo data and remembered location/asset catalog behavior.
-- `app/api/`: FastAPI route modules for API and page handlers.
-- `app/main.py`: application wiring and router registration.
+- `app/models/`: SQLAlchemy persistence models and enums
+- `app/schema/`: Pydantic request and response contracts
+- `app/services/`: demo data and catalog helpers
+- `app/api/`: API and page routers plus shared dependency helpers
+- `alembic/versions/`: schema migrations
 
-## Diagrams
-
-### ER Diagram
+## Data Model
 
 ```mermaid
 erDiagram
-    LOCATIONS {
-        uuid id PK
-        uuid user_id FK
-        text name
-        timestamptz created_at
-    }
-
-    ASSETS {
-        uuid id PK
-        uuid location_id FK
-        text name
-        timestamptz created_at
-    }
-
     ORGANISATIONS {
         uuid id PK
         text name UK
         enum type
+        uuid parent_org_id FK
+        enum contractor_mode
         timestamptz created_at
     }
 
@@ -80,16 +76,31 @@ erDiagram
         timestamptz created_at
     }
 
+    LOCATIONS {
+        uuid id PK
+        uuid organisation_id FK
+        text name
+        timestamptz created_at
+    }
+
+    ASSETS {
+        uuid id PK
+        uuid location_id FK
+        text name
+        timestamptz created_at
+    }
+
     JOBS {
         uuid id PK
         text title
         text description
-        text location
-        uuid location_id FK
-        uuid asset_id FK
+        text location_snapshot
         enum status
         uuid created_by FK
+        uuid location_id FK
+        uuid asset_id FK
         uuid assigned_org_id FK
+        uuid assigned_contractor_user_id FK
         timestamptz created_at
         timestamptz updated_at
     }
@@ -101,163 +112,175 @@ erDiagram
         uuid actor_org_id FK
         uuid location_id FK
         uuid asset_id FK
+        enum event_type
         text message
+        text reason_code
+        enum responsibility_stage
+        enum owner_scope
         timestamptz created_at
     }
 
-    USERS ||--o{ LOCATIONS : remembers
+    ORGANISATIONS ||--o{ ORGANISATIONS : parent_of
+    ORGANISATIONS ||--o{ USERS : has
+    ORGANISATIONS ||--o{ LOCATIONS : owns
     LOCATIONS ||--o{ ASSETS : contains
     LOCATIONS ||--o{ JOBS : reported_at
     ASSETS ||--o{ JOBS : reported_on
-    LOCATIONS ||--o{ EVENTS : context_for
-    ASSETS ||--o{ EVENTS : context_for
-    ORGANISATIONS ||--o{ USERS : has
-    ORGANISATIONS ||--o{ JOBS : assigned_to
+    ORGANISATIONS ||--o{ JOBS : assigned_org
+    USERS ||--o{ JOBS : direct_assignee
     USERS ||--o{ JOBS : creates
     JOBS ||--o{ EVENTS : has
-    USERS ||--o{ EVENTS : actor_user
-    ORGANISATIONS ||--o{ EVENTS : actor_org
 ```
 
-### Flow Chart
+## Lifecycle
 
-```mermaid
-flowchart LR
-    ResidentPage["/resident/report<br/>/resident/jobs<br/>/resident/jobs/{job_id}"]
-    AdminPage["/admin/jobs<br/>/admin/jobs/{job_id}"]
-    ContractorPage["/contractor/jobs<br/>/contractor/jobs/{job_id}"]
-
-    ResidentAPI["POST /api/jobs<br/>GET /api/jobs?mine=true<br/>GET /api/jobs/{job_id}<br/>GET /api/jobs/{job_id}/events<br/>POST /api/jobs/{job_id}/events"]
-    AdminAPI["GET /api/jobs<br/>PATCH /api/jobs/{job_id}<br/>GET /api/jobs/{job_id}/events<br/>POST /api/jobs/{job_id}/events"]
-    ContractorAPI["GET /api/jobs?assigned=true<br/>PATCH /api/jobs/{job_id}<br/>GET /api/jobs/{job_id}/events<br/>POST /api/jobs/{job_id}/events"]
-    MeAPI["GET /api/me"]
-
-    Jobs[(jobs)]
-    Events[(events)]
-    Locations[(locations)]
-    Assets[(assets)]
-    Users[(users)]
-    Orgs[(organisations)]
-
-    ResidentPage --> ResidentAPI
-    AdminPage --> AdminAPI
-    ContractorPage --> ContractorAPI
-
-    ResidentPage --> MeAPI
-    AdminPage --> MeAPI
-    ContractorPage --> MeAPI
-
-    ResidentAPI --> Jobs
-    ResidentAPI --> Events
-    ResidentAPI --> Locations
-    ResidentAPI --> Assets
-    ResidentAPI --> Users
-    ResidentAPI --> Orgs
-
-    AdminAPI --> Jobs
-    AdminAPI --> Events
-    AdminAPI --> Locations
-    AdminAPI --> Assets
-    AdminAPI --> Users
-    AdminAPI --> Orgs
-
-    ContractorAPI --> Jobs
-    ContractorAPI --> Events
-    ContractorAPI --> Locations
-    ContractorAPI --> Assets
-    ContractorAPI --> Users
-    ContractorAPI --> Orgs
-
-    MeAPI --> Users
-    MeAPI --> Orgs
-```
-
-### Architecture Diagram
-
-```mermaid
-flowchart TB
-    Browser["Browser (Role-switched UI)"]
-
-    subgraph RolePages["Server-rendered role pages"]
-        ResidentPage["Resident pages"]
-        AdminPage["Admin pages"]
-        ContractorPage["Contractor pages"]
-    end
-
-    subgraph FastAPI["FastAPI app"]
-        Routes["API + page routes (app/api)"]
-        Schemas["Pydantic API schemas (app/schema)"]
-        Auth["Header/cookie user context"]
-        Domain["Job + event domain logic"]
-    end
-
-    subgraph Data["Persistence"]
-        PG[("PostgreSQL")]
-        Tables["users / organisations / locations / assets / jobs / events"]
-    end
-
-    Browser --> ResidentPage
-    Browser --> AdminPage
-    Browser --> ContractorPage
-
-    ResidentPage --> Routes
-    AdminPage --> Routes
-    ContractorPage --> Routes
-
-    Routes --> Auth
-    Routes --> Schemas
-    Routes --> Domain
-    Domain --> PG
-    PG --> Tables
-```
-
-### State Machine
+### Business-Level State Diagram
 
 ```mermaid
 stateDiagram-v2
-    [*] --> new: Resident creates report
-    new --> assigned: Admin assigns contractor
-    assigned --> in_progress: Admin or contractor starts work
-    assigned --> completed: Admin or contractor completes work
-    in_progress --> completed: Admin or contractor completes work
-    completed --> [*]
+    [*] --> new
+    new --> assigned
+    assigned --> triaged
+    triaged --> scheduled
+    scheduled --> in_progress
+    in_progress --> completed
 
-    assigned --> new: Admin clears assignment\n(no explicit status in PATCH)
+    assigned --> on_hold
+    triaged --> on_hold
+    scheduled --> on_hold
+    in_progress --> on_hold
+    in_progress --> blocked
+
+    assigned --> escalated
+    triaged --> escalated
+    scheduled --> escalated
+    in_progress --> escalated
+
+    completed --> reopened
+    completed --> follow_up_scheduled
+    follow_up_scheduled --> in_progress
+    reopened --> triaged
+
+    cancelled --> [*]
 ```
 
-## Demo users
+### Guard Conditions And Side Effects
 
-The app seeds three users on startup:
+| Rule | Applies to | Effect |
+| --- | --- | --- |
+| Assignee required | `assigned`, `scheduled`, `in_progress`, `blocked`, `completed`, `follow_up_scheduled` | Transition is rejected unless `assigned_org_id` or `assigned_contractor_user_id` is set |
+| Assignment exclusivity | assignment updates | `assigned_org_id` and `assigned_contractor_user_id` cannot both be non-null |
+| Assignment clear rollback | clearing the last assignee without an explicit status change | job moves back to `new` or `triaged` instead of remaining unassigned in an execution state |
+| Triage permission | `triaged`, `scheduled`, `follow_up_scheduled` | only `triage_officer` or `admin` can move jobs into these states |
+| Assignment permission | assignment field changes | only `coordinator` or `admin` can change dispatch target |
+| Execution permission | `in_progress`, `blocked`, `completed` | contractor handles normal execution updates; admin completion requires a `reason_code` |
+| Accountability metadata | `on_hold`, `blocked`, `cancelled`, `reopened`, `follow_up_scheduled`, `escalated` | `reason_code` is required and the resulting event stores `event_type`, `responsibility_stage`, and `owner_scope` |
+
+## Assignment Semantics
+
+- `assigned_org_id` is for organisation-backed dispatch
+- `assigned_contractor_user_id` is for direct contractor dispatch, including independent contractors
+- the two assignment fields are mutually exclusive
+- the `assigned` status is now an explicit lifecycle state, not a synonym for “has an org assignment”
+- contractor visibility covers jobs assigned to their organisation or directly to their user record
+
+## API Examples
+
+### Create A Resident Report
+
+```json
+POST /api/jobs
+{
+  "title": "Leaking bathroom tap",
+  "description": "Water is pooling under the sink.",
+  "location": "Block A Room 14",
+  "asset_name": "Sink"
+}
+```
+
+### Dispatch Directly To An Independent Contractor
+
+```json
+PATCH /api/jobs/{job_id}
+{
+  "assigned_contractor_user_id": "2b53b4e8-6c72-4e89-9a3c-1bc7b9150b53"
+}
+```
+
+### Schedule A Visit After Triage
+
+```json
+PATCH /api/jobs/{job_id}
+{
+  "status": "scheduled"
+}
+```
+
+### Contractor Completes Work
+
+```json
+PATCH /api/jobs/{job_id}
+{
+  "status": "completed"
+}
+```
+
+### Schedule A Follow-Up After Completion
+
+```json
+PATCH /api/jobs/{job_id}
+{
+  "status": "follow_up_scheduled",
+  "reason_code": "resident_reported_recurrence"
+}
+```
+
+### Example Job Response Fields
+
+```json
+{
+  "status": "assigned",
+  "assigned_org_id": null,
+  "assigned_contractor_user_id": "2b53b4e8-6c72-4e89-9a3c-1bc7b9150b53",
+  "assigned_contractor_name": "Indy Independent",
+  "assignee_scope": "user",
+  "assignee_label": "Indy Independent"
+}
+```
+
+### Example Timeline Event Fields
+
+```json
+{
+  "event_type": "assignment",
+  "message": "Assigned Indy Independent",
+  "reason_code": null,
+  "responsibility_stage": "triage",
+  "owner_scope": "user"
+}
+```
+
+## Demo Users
+
+Seeded users:
 - `resident@fixhub.test`
 - `admin@fixhub.test`
+- `reception@fixhub.test`
+- `triage@fixhub.test`
+- `coordinator@fixhub.test`
 - `contractor@fixhub.test`
+- `maintenance.contractor@fixhub.test`
+- `independent.contractor@fixhub.test`
 
-In the browser, open `/` and choose one of those demo users to sign in.
-After that, use the top-right switcher to jump between them.
+Seeded organisations:
+- `University of Newcastle`
+- `Student Living` (child of `University of Newcastle`)
+- `Newcastle Plumbing` (`external_contractor`)
+- `Campus Maintenance` (`maintenance_team`)
 
-For API calls, set `X-User-Email` to one of those addresses.
+## Run Modes
 
-## Database defaults
-
-Both local `uvicorn` and Docker use the same PostgreSQL database by default.
-
-Connection values:
-- database: `fixhub`
-- user: `postgres`
-- password: `postgres`
-- port: `5432`
-
-Hostname depends on where the app is running:
-- host machine: `localhost`
-- Docker app container: `db`
-
-## Run modes
-
-Choose one app mode at a time.
-
-### Mode 1: local app + Docker Postgres
-
-Use this when you want live code reload from your workstation.
+### Local App + Docker Postgres
 
 ```powershell
 pip install -e .[dev]
@@ -265,44 +288,15 @@ docker compose up db -d
 uvicorn app.main:app --reload
 ```
 
-The local app connects to:
-
-```text
-postgresql+psycopg://postgres:postgres@localhost:5432/fixhub
-```
-
 Open: [http://localhost:8000](http://localhost:8000)
 
-Important:
-- run only the `db` service here, not the Docker `app` service
-- if Docker `app` is already running, stop it first with `docker compose stop app`
-- otherwise port `8000` is already occupied by Docker and you will not be talking to your local `uvicorn`
-
-### Mode 2: full Docker stack
+### Full Docker Stack
 
 ```powershell
 docker compose up --build
 ```
 
-The Docker app container connects to:
-
-```text
-postgresql+psycopg://postgres:postgres@db:5432/fixhub
-```
-
-Open: [http://localhost:8000](http://localhost:8000)
-
-### Mode 3: local app on a different port while Docker app is running
-
-If you intentionally want both app processes running:
-
-```powershell
-uvicorn app.main:app --reload --port 8001
-```
-
-Open the local host app at [http://localhost:8001](http://localhost:8001)
-
-## Production-style manual run
+### Production-Style Manual Run
 
 ```powershell
 $env:DATABASE_URL = "postgresql+psycopg://postgres:postgres@localhost:5432/fixhub"
@@ -313,38 +307,14 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 ## Documentation
 
 - docs index: [docs/README.md](docs/README.md)
+- architecture notes: [docs/architecture.md](docs/architecture.md)
 - schema assessment: [docs/schema_student_living_assessment.md](docs/schema_student_living_assessment.md)
 - docs changelog: [docs/CHANGELOG.md](docs/CHANGELOG.md)
 
-## Development Change Log (Implemented)
+## Verification
 
-Timestamp: `2026-03-13 23:17:31 +11:00`
+Current implementation was verified with:
 
-- default database URL changed from SQLite to PostgreSQL in `app/core/config.py`.
-- browser access now requires an explicit demo user selection instead of auto-loading a default resident.
-- frontend forms now declare `method="post"` in resident/admin/contractor templates.
-- base template loads `/static/app.js` without `defer` for form wiring consistency.
-- test coverage adds `test_report_page_wires_post_form` to verify script and POST form wiring.
-
-## Documentation TODO (Proposed)
-
-- add a dedicated architecture diagram for data flow between role pages and API routes.
-- add a repeatable docs review checklist to CI once the project has a stable lint/test environment.
-- add environment bootstrap notes for Windows Python installations to avoid `encodings` startup failures during test runs.
-
-## Notes
-
-- The app auto-seeds demo organisations and users.
-- API request/response contracts live in `app/schema`, while persistence models live in `app/models`.
-- Residents now report against both a location and an asset, and that pair is remembered for future reports.
-- The UI is server-rendered and reuses one `EventTimeline` partial across roles.
-- Authentication is intentionally lightweight for the demo: explicit demo sign-in in the UI, cookie switching after sign-in, and `X-User-Email` for API use.
-
-## Troubleshooting
-
-- `localhost:8000` shows pages but new jobs do not appear:
-  You are probably hitting a different app process than the one you think you started. Check whether Docker `app` is already bound to port `8000`.
-- local `uvicorn` cannot connect to the database:
-  Make sure `docker compose up db -d` is running and Postgres is listening on `localhost:5432`.
-- Docker app cannot connect to the database:
-  Inside Compose, the hostname must be `db`, not `localhost`.
+```powershell
+python -m pytest tests\test_schema.py tests\test_app.py
+```

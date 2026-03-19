@@ -1,10 +1,10 @@
 {% extends "base.html" %}
-{% block title %}Admin Job Page | FixHub{% endblock %}
+{% block title %}Operations Job Page | FixHub{% endblock %}
 {% block content %}
 <section class="detail-grid">
   <article class="grid">
     <section class="panel">
-      <p class="eyebrow">Admin</p>
+      <p class="eyebrow">Operations</p>
       <h1>{{ job.title }}</h1>
       <div class="meta-list">
         <div class="meta-item">
@@ -32,8 +32,8 @@
 
     <section class="panel">
       <div class="panel-header">
-        <h2>Assign contractor</h2>
-        <p>{{ job.assigned_org_name or "No contractor assigned yet." }}</p>
+        <h2>Dispatch contractor</h2>
+        <p>{{ job.assignee_label or "No contractor assigned yet." }}</p>
       </div>
       <form id="assign-form" class="form-grid" method="post">
         <label>
@@ -41,12 +41,22 @@
           <select name="assigned_org_id">
             <option value="">No contractor assigned</option>
             {% for organisation in contractor_orgs %}
-            <option value="{{ organisation.id }}" {% if organisation.id == job.assigned_org_id %}selected{% endif %}>{{ organisation.name }}</option>
+            <option value="{{ organisation.id }}" {% if organisation.id == job.assigned_org_id %}selected{% endif %}>{{ organisation.name }}{% if organisation.contractor_mode %} ({{ organisation.contractor_mode.replace("_", " ")|title }}){% endif %}</option>
             {% endfor %}
           </select>
         </label>
+        <label>
+          Direct contractor
+          <select name="assigned_contractor_user_id">
+            <option value="">No direct contractor</option>
+            {% for contractor in contractor_users %}
+            <option value="{{ contractor.id }}" {% if contractor.id == job.assigned_contractor_user_id %}selected{% endif %}>{{ contractor.name }}{% if contractor.organisation_name %} ({{ contractor.organisation_name }}){% endif %}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <p class="muted form-helper">Choose either an organisation or a direct contractor. Clearing both removes the dispatch target.</p>
         <div class="actions">
-          <button class="button" type="submit">Assign contractor</button>
+          <button class="button" type="submit">Save dispatch</button>
         </div>
         <p class="feedback" data-feedback></p>
       </form>
@@ -54,13 +64,17 @@
 
     <section class="panel">
       <div class="panel-header">
-        <h2>Admin controls</h2>
-        <p>Use status changes sparingly. Most detail belongs in the timeline.</p>
+        <h2>Workflow controls</h2>
+        <p>Triage and scheduling belong here. Execution updates should normally come from the assigned contractor.</p>
       </div>
       <div class="actions">
         <button class="button secondary" data-status="assigned" type="button">Mark assigned</button>
-        <button class="button secondary" data-status="in_progress" type="button">Mark in progress</button>
-        <button class="button secondary" data-status="completed" type="button">Mark completed</button>
+        <button class="button secondary" data-status="triaged" type="button">Mark triaged</button>
+        <button class="button secondary" data-status="scheduled" type="button">Schedule visit</button>
+        <button class="button secondary" data-status="on_hold" type="button">Put on hold</button>
+        <button class="button secondary" data-status="escalated" type="button">Escalate</button>
+        <button class="button secondary" data-status="reopened" type="button">Reopen</button>
+        <button class="button secondary" data-status="follow_up_scheduled" type="button">Schedule follow-up</button>
       </div>
       <p class="feedback" id="status-feedback"></p>
     </section>
@@ -75,7 +89,7 @@
           Message
           <textarea name="message" placeholder="contractor confirmed tomorrow visit" required></textarea>
         </label>
-        <p class="muted form-helper">Examples: contractor confirmed tomorrow visit, waiting on spare parts, inspection complete, resident granted access.</p>
+        <p class="muted form-helper">Examples: access confirmed for Tuesday, awaiting replacement part, follow-up visit approved.</p>
         <div class="actions">
           <button class="button ghost" type="submit">Add note</button>
         </div>
@@ -92,8 +106,13 @@
 
   FixHub.wireJsonForm(document.getElementById("assign-form"), async (formData) => {
     const assignedOrgId = formData.get("assigned_org_id");
+    const assignedContractorUserId = formData.get("assigned_contractor_user_id");
+    if (assignedOrgId && assignedContractorUserId) {
+      throw new Error("Choose either a contractor organisation or a direct contractor.");
+    }
     await FixHub.sendJson("/api/jobs/{{ job.id }}", "PATCH", {
       assigned_org_id: assignedOrgId === "" ? null : assignedOrgId,
+      assigned_contractor_user_id: assignedContractorUserId === "" ? null : assignedContractorUserId,
     });
     reloadPage();
   });
