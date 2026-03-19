@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import inspect, select
 
 from app.main import create_app
-from app.models import ContractorMode, Job, Organisation, User
+from app.models import ContractorMode, Organisation, User
 
 
 def auth_headers(email: str) -> dict[str, str]:
@@ -93,7 +93,7 @@ def complete_org_assigned_job(client: TestClient, job_id: str, *, assigned_org_i
     complete_response = client.patch(
         f"/api/jobs/{job_id}",
         headers=auth_headers("contractor@fixhub.test"),
-        json={"status": "completed"},
+        json={"status": "completed", "responsibility_stage": "execution"},
     )
     assert complete_response.status_code == 200
 
@@ -194,7 +194,7 @@ def test_resident_triage_schedule_execute_flow_records_structured_metadata(tmp_p
         complete_response = client.patch(
             f"/api/jobs/{job['id']}",
             headers=auth_headers("contractor@fixhub.test"),
-            json={"status": "completed"},
+            json={"status": "completed", "responsibility_stage": "execution"},
         )
         assert complete_response.status_code == 200
         assert complete_response.json()["status"] == "completed"
@@ -381,6 +381,167 @@ def test_follow_up_scheduled_requires_reason_code(tmp_path) -> None:
     assert follow_up_event["event_type"] == "follow_up"
     assert follow_up_event["reason_code"] == "resident_reported_recurrence"
     assert follow_up_event["responsibility_stage"] == "coordination"
+
+
+def test_completed_transition_requires_explicit_accountability_metadata(tmp_path) -> None:
+    app, client = build_client(tmp_path)
+
+    with client:
+        ids = lookup_ids(app)
+        job = create_job(client, title="Common room heater fault", location="Block J Lounge")
+        move_to_in_progress(client, job["id"], assigned_org_id=ids["newcastle_plumbing_org_id"])
+
+        invalid_complete = client.patch(
+            f"/api/jobs/{job['id']}",
+            headers=auth_headers("contractor@fixhub.test"),
+            json={"status": "completed"},
+        )
+        valid_complete = client.patch(
+            f"/api/jobs/{job['id']}",
+            headers=auth_headers("contractor@fixhub.test"),
+            json={"status": "completed", "responsibility_stage": "execution"},
+        )
+        events = job_events(client, job["id"], email="contractor@fixhub.test")
+
+    assert invalid_complete.status_code == 422
+    assert invalid_complete.json() == {
+        "detail": "reason_code or responsibility_stage is required when moving a job to completed"
+    }
+    assert valid_complete.status_code == 200
+    assert valid_complete.json()["status"] == "completed"
+    completion_event = next(event for event in events if event["message"] == "Marked job completed")
+    assert completion_event["responsibility_stage"] == "execution"
+
+
+def test_blocked_transition_requires_reason_code_and_supports_reschedule(tmp_path) -> None:
+    app, client = build_client(tmp_path)
+
+    with client:
+        ids = lookup_ids(app)
+        job = create_job(client, title="Laundry pump stalled", location="Block K Laundry")
+        move_to_in_progress(client, job["id"], assigned_org_id=ids["newcastle_plumbing_org_id"])
+
+        invalid_blocked = client.patch(
+            f"/api/jobs/{job['id']}",
+            headers=auth_headers("contractor@fixhub.test"),
+            json={"status": "blocked"},
+        )
+        valid_blocked = client.patch(
+            f"/api/jobs/{job['id']}",
+            headers=auth_headers("contractor@fixhub.test"),
+            json={"status": "blocked", "reason_code": "part_backordered"},
+        )
+        reschedule = client.patch(
+            f"/api/jobs/{job['id']}",
+            headers=auth_headers("triage@fixhub.test"),
+            json={"status": "scheduled"},
+        )
+        events = job_events(client, job["id"], email="contractor@fixhub.test")
+
+    assert invalid_blocked.status_code == 422
+    assert invalid_blocked.json() == {"detail": "reason_code is required when moving a job to blocked"}
+    assert valid_blocked.status_code == 200
+    assert valid_blocked.json()["status"] == "blocked"
+    assert reschedule.status_code == 200
+    assert reschedule.json()["status"] == "scheduled"
+    blocked_event = next(event for event in events if event["message"] == "Marked job blocked")
+    assert blocked_event["reason_code"] == "part_backordered"
+    assert blocked_event["responsibility_stage"] == "execution"
+
+
+def test_on_hold_and_reopened_paths_require_reason_codes(tmp_path) -> None:
+    app, client = build_client(tmp_path)
+
+    with client:
+        ids = lookup_ids(app)
+        job = create_job(client, title="Shower pressure inconsistent", location="Block L Room 7")
+
+        assign_response = client.patch(
+            f"/api/jobs/{job['id']}",
+            headers=auth_headers("coordinator@fixhub.test"),
+            json={"assigned_org_id": str(ids["newcastle_plumbing_org_id"])},
+        )
+        assert assign_response.status_code == 200
+
+        triage_response = client.patch(
+            f"/api/jobs/{job['id']}",
+            headers=auth_headers("triage@fixhub.test"),
+            json={"status": "triaged"},
+        )
+        assert triage_response.status_code == 200
+
+        schedule_response = client.patch(
+            f"/api/jobs/{job['id']}",
+            headers=auth_headers("triage@fixhub.test"),
+            json={"status": "scheduled"},
+        )
+        assert schedule_response.status_code == 200
+
+        invalid_on_hold = client.patch(
+            f"/api/jobs/{job['id']}",
+            headers=auth_headers("triage@fixhub.test"),
+            json={"status": "on_hold"},
+        )
+        valid_on_hold = client.patch(
+            f"/api/jobs/{job['id']}",
+            headers=auth_headers("triage@fixhub.test"),
+            json={"status": "on_hold", "reason_code": "resident_requested_delay"},
+        )
+        back_to_scheduled = client.patch(
+            f"/api/jobs/{job['id']}",
+            headers=auth_headers("triage@fixhub.test"),
+            json={"status": "scheduled"},
+        )
+        progress_response = client.patch(
+            f"/api/jobs/{job['id']}",
+            headers=auth_headers("contractor@fixhub.test"),
+            json={"status": "in_progress"},
+        )
+        assert progress_response.status_code == 200
+
+        complete_response = client.patch(
+            f"/api/jobs/{job['id']}",
+            headers=auth_headers("contractor@fixhub.test"),
+            json={"status": "completed", "responsibility_stage": "execution"},
+        )
+        assert complete_response.status_code == 200
+
+        invalid_reopen = client.patch(
+            f"/api/jobs/{job['id']}",
+            headers=auth_headers("coordinator@fixhub.test"),
+            json={"status": "reopened"},
+        )
+        valid_reopen = client.patch(
+            f"/api/jobs/{job['id']}",
+            headers=auth_headers("coordinator@fixhub.test"),
+            json={"status": "reopened", "reason_code": "resident_reported_recurrence"},
+        )
+        back_to_triaged = client.patch(
+            f"/api/jobs/{job['id']}",
+            headers=auth_headers("triage@fixhub.test"),
+            json={"status": "triaged"},
+        )
+        events = job_events(client, job["id"])
+
+    assert invalid_on_hold.status_code == 422
+    assert invalid_on_hold.json() == {"detail": "reason_code is required when moving a job to on_hold"}
+    assert valid_on_hold.status_code == 200
+    assert valid_on_hold.json()["status"] == "on_hold"
+    assert back_to_scheduled.status_code == 200
+    assert back_to_scheduled.json()["status"] == "scheduled"
+    on_hold_event = next(event for event in events if event["message"] == "Placed job on hold")
+    assert on_hold_event["reason_code"] == "resident_requested_delay"
+    assert on_hold_event["responsibility_stage"] == "coordination"
+
+    assert invalid_reopen.status_code == 422
+    assert invalid_reopen.json() == {"detail": "reason_code is required when moving a job to reopened"}
+    assert valid_reopen.status_code == 200
+    assert valid_reopen.json()["status"] == "reopened"
+    assert back_to_triaged.status_code == 200
+    assert back_to_triaged.json()["status"] == "triaged"
+    reopened_event = next(event for event in events if event["message"] == "Reopened job")
+    assert reopened_event["reason_code"] == "resident_reported_recurrence"
+    assert reopened_event["responsibility_stage"] == "triage"
 
 
 def test_assignment_fields_are_mutually_exclusive(tmp_path) -> None:

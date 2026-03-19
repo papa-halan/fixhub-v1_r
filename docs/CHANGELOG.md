@@ -6,6 +6,20 @@
 - Reviewer: `schema-test-automation`
 - Status: `active`
 
+## [0.4.3] - 2026-03-19 15:24:12 +11:00
+
+### Changed
+- extracted workflow/state-machine helpers into `app/services/workflow.py` so transition rules, accountability defaults, and event side effects are owned by the service layer rather than `app/api/deps.py`
+- tightened completion accountability: moving a job to `completed` now requires an explicit `reason_code` or `responsibility_stage`
+- updated operations and contractor job pages so reason-coded transitions can be supplied from the UI, and contractor completion sends `responsibility_stage=execution`
+- expanded `tests/test_app.py` coverage for blocked, on-hold, reopened, and explicit completion-accountability paths
+- refreshed `README.md`, `docs/README.md`, `docs/schema_student_living_assessment.md`, and `docs/todo_implementation_checklist.md` to match the verified runtime behavior
+
+### Notes
+- runtime verification succeeded in this environment with `.\.venv\Scripts\python.exe -m pytest tests\test_schema.py tests\test_app.py` and `.\.venv\Scripts\python.exe -m ruff check app tests`
+- result: `23 passed`, `ruff` clean
+- this workspace already contained dirty-worktree documentation entries timestamped later than the current environment clock; this entry records the actual runtime timestamp from the current session
+
 ## [0.4.2] - 2026-03-19 15:12:17 +11:00
 
 ### Changed

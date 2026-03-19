@@ -50,7 +50,7 @@ Server-rendered pages:
 
 - `app/models/`: SQLAlchemy persistence models and enums
 - `app/schema/`: Pydantic request and response contracts
-- `app/services/`: demo data and catalog helpers
+- `app/services/`: workflow/state-machine rules plus demo data and catalog helpers
 - `app/api/`: API and page routers plus shared dependency helpers
 - `alembic/versions/`: schema migrations
 
@@ -173,8 +173,8 @@ stateDiagram-v2
 | Assignment clear rollback | clearing the last assignee without an explicit status change | job moves back to `new` or `triaged` instead of remaining unassigned in an execution state |
 | Triage permission | `triaged`, `scheduled`, `follow_up_scheduled` | only `triage_officer` or `admin` can move jobs into these states |
 | Assignment permission | assignment field changes | only `coordinator` or `admin` can change dispatch target |
-| Execution permission | `in_progress`, `blocked`, `completed` | contractor handles normal execution updates; admin completion requires a `reason_code` |
-| Accountability metadata | `on_hold`, `blocked`, `cancelled`, `reopened`, `follow_up_scheduled`, `escalated` | `reason_code` is required and the resulting event stores `event_type`, `responsibility_stage`, and `owner_scope` |
+| Execution permission | `in_progress`, `blocked`, `completed` | contractor handles normal execution updates; moving to `completed` now requires an explicit `reason_code` or `responsibility_stage` |
+| Accountability metadata | `on_hold`, `blocked`, `cancelled`, `reopened`, `follow_up_scheduled`, `escalated`, `completed` | branch states require `reason_code`; completion requires explicit accountability metadata and the resulting event stores `event_type`, `responsibility_stage`, and `owner_scope` |
 
 ## Assignment Semantics
 
@@ -221,7 +221,8 @@ PATCH /api/jobs/{job_id}
 ```json
 PATCH /api/jobs/{job_id}
 {
-  "status": "completed"
+  "status": "completed",
+  "responsibility_stage": "execution"
 }
 ```
 

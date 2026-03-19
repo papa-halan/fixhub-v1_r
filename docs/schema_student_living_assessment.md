@@ -1,6 +1,6 @@
 # Schema Assessment: Student Living Workflow
 
-Date: `2026-03-19 15:12:17 +11:00`
+Date: `2026-03-19 15:24:12 +11:00`
 
 ## Document Metadata
 
@@ -13,6 +13,7 @@ Date: `2026-03-19 15:12:17 +11:00`
 - `JobStatus` now covers `new`, `assigned`, `triaged`, `scheduled`, `in_progress`, `on_hold`, `blocked`, `completed`, `cancelled`, `reopened`, `follow_up_scheduled`, and `escalated`
 - assignment is decoupled from status via mutually exclusive `assigned_org_id` and `assigned_contractor_user_id`
 - event records now store `event_type`, `reason_code`, `responsibility_stage`, and `owner_scope`
+- workflow/status-transition rules now live in `app/services/workflow.py`, keeping the API layer focused on transport concerns
 - operations roles now include `reception_admin`, `triage_officer`, and `coordinator`
 - organisations support `parent_org_id` and optional `contractor_mode`
 - seeded data now models `University of Newcastle -> Student Living` plus both external and maintenance contractor modes
@@ -36,20 +37,37 @@ Date: `2026-03-19 15:12:17 +11:00`
 | assignment exclusivity | org assignment and direct contractor assignment cannot both be present |
 | triage permissions | only `triage_officer` or `admin` can move jobs to `triaged`, `scheduled`, or `follow_up_scheduled` |
 | coordination permissions | only `coordinator` or `admin` can change assignment, reopen, escalate, or cancel |
-| accountability requirement | branch states such as `on_hold`, `blocked`, `reopened`, `follow_up_scheduled`, and `escalated` require `reason_code` |
+| accountability requirement | branch states such as `on_hold`, `blocked`, `reopened`, `follow_up_scheduled`, and `escalated` require `reason_code`; `completed` requires an explicit `reason_code` or `responsibility_stage` |
 
 ## Verification Evidence
 
-- required runtime verification command: `python -m pytest tests\test_schema.py tests\test_app.py`
-- current run execution status: blocked in this sandbox (`python`/`py` unavailable; `.venv\\Scripts\\python.exe` execution denied)
-- latest recorded successful result in repository docs: `20 passed` (prior run entry at `2026-03-19 17:20:00 +11:00`)
-- static coverage grounding in this run confirms existing tests target lifecycle progression, direct contractor assignment, assignment rollback invariants, role gating, and structured event metadata
+- required runtime verification command: `.\.venv\Scripts\python.exe -m pytest tests\test_schema.py tests\test_app.py`
+- current run execution status: verified locally in this environment
+- latest recorded successful result in this run: `23 passed`
+- additional verification in this run: `.\.venv\Scripts\python.exe -m ruff check app tests` passed cleanly
+- runtime coverage in this run now includes lifecycle progression, direct contractor assignment, assignment rollback invariants, role gating, blocked/on-hold/reopen branches, and explicit completion-accountability enforcement
 
 ## Remaining TODO (Proposed)
 
 - split resident request from execution work order if one resident issue must spawn multiple contractor tracks
 - add a first-class visit/appointment entity instead of representing scheduling only as status plus timeline events
 - decide whether the legacy `admin` umbrella role should remain long term or be fully replaced by capability-style permissions
+
+## Run Log: `2026-03-19 15:24:12 +11:00`
+
+### Delivered In This Run
+
+- extracted workflow/state-machine helpers into `app/services/workflow.py`
+- moved API consumers onto the workflow service for transition guards, event defaults, and assignment fallback behavior
+- tightened completion accountability so `completed` now requires explicit `reason_code` or `responsibility_stage`
+- updated the operations and contractor pages so prompted reason codes can be supplied for guarded transitions, and contractor completion sends `responsibility_stage=execution`
+- expanded app tests for `blocked`, `on_hold`, `reopened`, and explicit completion-accountability paths
+- verified the focused schema/app suite and lint checks in this environment
+
+### Outcome
+
+- the refined Student Living workflow is now implemented with a dedicated workflow service layer, stronger accountability on completion, and broader executable regression coverage
+- this workspace still contains older dirty-worktree documentation entries with later timestamps than the current environment clock; the timestamp above reflects the actual runtime-verification session for this pass
 
 ## Run Log: `2026-03-19 15:12:17 +11:00`
 

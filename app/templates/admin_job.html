@@ -129,7 +129,22 @@
       const feedback = document.getElementById("status-feedback");
       feedback.textContent = "";
       try {
-        await FixHub.sendJson("/api/jobs/{{ job.id }}", "PATCH", { status: button.dataset.status });
+        const payload = { status: button.dataset.status };
+        const statusesRequiringReason = new Set([
+          "on_hold",
+          "cancelled",
+          "reopened",
+          "follow_up_scheduled",
+          "escalated",
+        ]);
+        if (statusesRequiringReason.has(button.dataset.status)) {
+          const reasonCode = window.prompt("Enter a reason code for this transition:");
+          if (reasonCode === null) {
+            return;
+          }
+          payload.reason_code = reasonCode.trim();
+        }
+        await FixHub.sendJson("/api/jobs/{{ job.id }}", "PATCH", payload);
         reloadPage();
       } catch (error) {
         feedback.textContent = error.message;

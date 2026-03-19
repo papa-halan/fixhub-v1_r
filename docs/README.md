@@ -1,6 +1,6 @@
 # Documentation Index
 
-Last updated: `2026-03-19 15:12:17 +11:00`
+Last updated: `2026-03-19 15:24:12 +11:00`
 
 ## Document Metadata
 
@@ -24,6 +24,7 @@ This folder stores implementation-aligned architecture, workflow, migration, and
 ## Current Documentation Focus
 
 - README documents the implemented data model, lifecycle, guard conditions, and API examples
+- the workflow service now owns status-transition rules, accountability guards, and event-side-effect defaults
 - the schema assessment records the refined Student Living workflow now present in code
 - architecture notes show how residents, operations roles, and contractors share the same timeline
 - the changelog captures what changed and how it was verified
@@ -35,7 +36,7 @@ This folder stores implementation-aligned architecture, workflow, migration, and
 - Portability of links and file references: pass
 - Runtime verification recorded in docs: pass
 - Docs freshness gate present in test suite: pass
-- Runtime execution available in current automation sandbox: blocked (static evidence only)
+- Runtime execution available in current automation sandbox: pass (`pytest` and `ruff` verified locally)
 
 ## TODO (Proposed Documentation Improvements)
 

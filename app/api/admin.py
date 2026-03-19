@@ -21,7 +21,7 @@ from app.api.deps import (
     visible_job,
     visible_jobs,
 )
-from app.models import User, UserRole
+from app.models import User
 
 
 router = APIRouter(prefix="/admin")

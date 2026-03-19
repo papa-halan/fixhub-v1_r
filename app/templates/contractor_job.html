@@ -81,7 +81,19 @@
       const feedback = document.getElementById("contractor-status-feedback");
       feedback.textContent = "";
       try {
-        await FixHub.sendJson("/api/jobs/{{ job.id }}", "PATCH", { status: button.dataset.status });
+        const payload = { status: button.dataset.status };
+        const statusesRequiringReason = new Set(["blocked", "on_hold"]);
+        if (statusesRequiringReason.has(button.dataset.status)) {
+          const reasonCode = window.prompt("Enter a reason code for this transition:");
+          if (reasonCode === null) {
+            return;
+          }
+          payload.reason_code = reasonCode.trim();
+        }
+        if (button.dataset.status === "completed") {
+          payload.responsibility_stage = "execution";
+        }
+        await FixHub.sendJson("/api/jobs/{{ job.id }}", "PATCH", payload);
         refresh();
       } catch (error) {
         feedback.textContent = error.message;

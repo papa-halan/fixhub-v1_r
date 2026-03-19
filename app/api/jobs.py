@@ -6,19 +6,9 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import (
-    ASSIGNEE_REQUIRED_STATUSES,
-    ASSIGNMENT_ROLES,
-    EventSpec,
-    STATUS_EVENT_MESSAGES,
-    append_event,
-    apply_status_change,
-    assignee_label,
-    assignee_scope,
     clean_text,
-    fallback_status_for_unassigned,
     get_current_user,
     get_session,
-    job_has_assignee,
     serialize_event,
     serialize_job,
     serialize_user,
@@ -37,7 +27,20 @@ from app.models import (
     UserRole,
 )
 from app.schema import EventCreate, EventRead, JobCreate, JobRead, JobUpdate, UserRead
-from app.services import find_or_create_asset, find_or_create_location
+from app.services import (
+    ASSIGNEE_REQUIRED_STATUSES,
+    ASSIGNMENT_ROLES,
+    EventSpec,
+    STATUS_EVENT_MESSAGES,
+    append_event,
+    apply_status_change,
+    assignee_label,
+    assignee_scope,
+    fallback_status_for_unassigned,
+    find_or_create_asset,
+    find_or_create_location,
+    job_has_assignee,
+)
 
 
 router = APIRouter(prefix="/api")

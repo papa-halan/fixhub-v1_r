@@ -1,6 +1,6 @@
 # TODO Implementation Checklist
 
-Last updated: `2026-03-19 15:12:17 +11:00`
+Last updated: `2026-03-19 15:24:12 +11:00`
 
 ## Document Metadata
 
@@ -12,7 +12,7 @@ Use this checklist to implement the current proposed TODO backlog in a controlle
 
 ## Pre-Work
 
-- [ ] Confirm current baseline passes relevant tests in target environment.
+- [x] Confirm current baseline passes relevant tests in target environment.
 - [ ] Create a feature branch for TODO implementation work.
 - [x] Review current TODO sources:
 - [x] `README.md` -> `Documentation TODO (Proposed)`
@@ -48,15 +48,15 @@ Acceptance checks:
 
 ### A3. Student Living Operational Roles
 
-- [ ] Expand role model (e.g., reception_admin, triage_officer, coordinator).
-- [ ] Update auth/permission checks by route and action.
-- [ ] Update seed/demo users for each role.
-- [ ] Ensure event/audit labels reflect accountable actor.
-- [ ] Add tests for role-scoped access.
+- [x] Expand role model (e.g., reception_admin, triage_officer, coordinator).
+- [x] Update auth/permission checks by route and action.
+- [x] Update seed/demo users for each role.
+- [x] Ensure event/audit labels reflect accountable actor.
+- [x] Add tests for role-scoped access.
 
 Acceptance checks:
-- [ ] Role boundaries are observable in API + UI behavior.
-- [ ] Unauthorized actions return expected errors.
+- [x] Role boundaries are observable in API + UI behavior.
+- [x] Unauthorized actions return expected errors.
 
 ### A4. Structured Visits and Routing Reasons
 
@@ -100,15 +100,15 @@ Acceptance checks:
 
 Acceptance checks:
 - [x] New docs are linked from `docs/README.md`.
-- [ ] `docs/CHANGELOG.md` records all documentation additions/changes.
+- [x] `docs/CHANGELOG.md` records all documentation additions/changes.
 
 ## Validation and Release
 
-- [ ] Run tests and linters in target environment.
+- [x] Run tests and linters in target environment.
 - [ ] Manually verify critical resident/admin/contractor flows.
-- [ ] Confirm docs reflect implemented state only.
-- [ ] Move remaining unimplemented items back into TODO sections.
-- [ ] Update `docs/CHANGELOG.md` with timestamped release notes.
+- [x] Confirm docs reflect implemented state only.
+- [x] Move remaining unimplemented items back into TODO sections.
+- [x] Update `docs/CHANGELOG.md` with timestamped release notes.
 - [x] Sync README Mermaid diagrams to currently implemented schema/routes/lifecycle only (no speculative states).
 - [x] Refresh `docs/README.md` SD-practice sanity checks and process feedback against current repository state.
 - [x] Append timestamped schema/doc sync run log entry in `docs/schema_student_living_assessment.md`.
@@ -123,8 +123,13 @@ Run note (`2026-03-19 15:12:17 +11:00`):
 - no additional minimal bug fix was applied in this run because no new concrete regression was identified from commit diffs alone.
 - runtime validation remains pending due environment execution blockers (`python` and `py` missing, `.venv\\Scripts\\python.exe` execution denied).
 
+Run note (`2026-03-19 15:24:12 +11:00`):
+- extracted lifecycle rules into `app/services/workflow.py` and expanded guarded-path coverage for blocked, on-hold, reopened, and explicit completion-accountability transitions.
+- runtime verification succeeded locally with `.\.venv\Scripts\python.exe -m pytest tests\test_schema.py tests\test_app.py` (`23 passed`) and `.\.venv\Scripts\python.exe -m ruff check app tests`.
+- this dirty worktree still contains older documentation entries timestamped later than the current environment clock; the timestamp above reflects the actual verification time for this pass.
+
 ## Definition of Done
 
 - [ ] Product TODOs implemented with migrations and passing tests.
 - [x] Documentation TODOs added, linked, and changelogged.
-- [ ] README/docs maintain explicit implemented vs proposed separation.
+- [x] README/docs maintain explicit implemented vs proposed separation.
