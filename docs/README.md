@@ -1,6 +1,6 @@
 # Documentation Index
 
-Last updated: `2026-03-19 17:20:00 +11:00`
+Last updated: `2026-03-19 15:04:12 +11:00`
 
 ## Document Metadata
 
@@ -35,6 +35,7 @@ This folder stores implementation-aligned architecture, workflow, migration, and
 - Portability of links and file references: pass
 - Runtime verification recorded in docs: pass
 - Docs freshness gate present in test suite: pass
+- Runtime execution available in current automation sandbox: blocked (static evidence only)
 
 ## TODO (Proposed Documentation Improvements)
 

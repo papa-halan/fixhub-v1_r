@@ -63,3 +63,19 @@ Date: `2026-03-19 17:20:00 +11:00`
 ### Outcome
 
 The resident-admin-contractor workflow now better matches a realistic Student Living operating model while preserving the newer location/asset foundation added earlier in the repository.
+
+## Run Log: `2026-03-19 15:04:12 +11:00`
+
+### Delivered In This Run
+
+- scanned commits since last automation run (`2026-03-19T03:31:31.650Z`) and in the last 24 hours.
+- confirmed there are no new commits since the last run; latest 24h commit remains `dcef84a5c27b2f611e9f0ccfca4777109e4c7d87`.
+- applied a minimal workflow consistency fix in `app/api/jobs.py`: permission error text now states `Only coordinators or admins can change assignment`, matching actual role checks.
+
+### Verification Status
+
+- attempted required runtime flow:
+  - `python -m pip install -e .[dev]`
+  - `python -m pytest --version`
+  - `python -m pytest`
+- execution is blocked in this environment (`python`/`py` unavailable and `.venv\\Scripts\\python.exe` cannot be executed due access denied), so this run is static/code-evidence verified only.

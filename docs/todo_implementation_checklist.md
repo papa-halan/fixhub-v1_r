@@ -1,6 +1,6 @@
 # TODO Implementation Checklist
 
-Last updated: `2026-03-19 14:35:04 +11:00`
+Last updated: `2026-03-19 15:04:12 +11:00`
 
 ## Document Metadata
 
@@ -112,6 +112,11 @@ Acceptance checks:
 - [x] Sync README Mermaid diagrams to currently implemented schema/routes/lifecycle only (no speculative states).
 - [x] Refresh `docs/README.md` SD-practice sanity checks and process feedback against current repository state.
 - [x] Append timestamped schema/doc sync run log entry in `docs/schema_student_living_assessment.md`.
+
+Run note (`2026-03-19 15:04:12 +11:00`):
+- commit review since last automation run found no new commits to triage.
+- runtime execution remains blocked in this environment (`python`/`py` unavailable, venv python access denied), so validation remains pending.
+- a minimal code fix was applied to align assignment permission error text with actual role checks.
 
 ## Definition of Done
 

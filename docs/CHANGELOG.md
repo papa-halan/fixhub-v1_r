@@ -6,6 +6,16 @@
 - Reviewer: `schema-test-automation`
 - Status: `active`
 
+## [0.4.1] - 2026-03-19 15:04:12 +11:00
+
+### Changed
+- corrected assignment-permission API detail text in `app/api/jobs.py` to match implemented role logic (`admin` and `coordinator` can assign).
+
+### Notes
+- commit scan since last run (`2026-03-19T03:31:31.650Z`) found no new commits.
+- latest commit in the 24h scan window remains `dcef84a5c27b2f611e9f0ccfca4777109e4c7d87` (`2026-03-19 13:51:04 +11:00`).
+- runtime command execution remains blocked (`python`/`py` unavailable; `.venv\\Scripts\\python.exe` access denied), so this run is static/code-evidence verified.
+
 ## [0.4.0] - 2026-03-19 17:20:00 +11:00
 
 ### Added

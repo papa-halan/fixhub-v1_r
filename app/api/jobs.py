@@ -178,7 +178,7 @@ def apply_assignment_change(
     if actor.role not in ASSIGNMENT_ROLES:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only coordinators can change assignment",
+            detail="Only coordinators or admins can change assignment",
         )
 
     requested_org_id = changes.get("assigned_org_id", job.assigned_org_id)
