@@ -1,6 +1,6 @@
 # Schema Assessment: Student Living Workflow
 
-Date: `2026-03-19 17:20:00 +11:00`
+Date: `2026-03-19 15:12:17 +11:00`
 
 ## Document Metadata
 
@@ -40,15 +40,32 @@ Date: `2026-03-19 17:20:00 +11:00`
 
 ## Verification Evidence
 
-- runtime verification command: `python -m pytest tests\test_schema.py tests\test_app.py`
-- result in this environment: `20 passed`
-- coverage now includes lifecycle progression, direct contractor assignment, assignment rollback invariants, role gating, and structured event metadata
+- required runtime verification command: `python -m pytest tests\test_schema.py tests\test_app.py`
+- current run execution status: blocked in this sandbox (`python`/`py` unavailable; `.venv\\Scripts\\python.exe` execution denied)
+- latest recorded successful result in repository docs: `20 passed` (prior run entry at `2026-03-19 17:20:00 +11:00`)
+- static coverage grounding in this run confirms existing tests target lifecycle progression, direct contractor assignment, assignment rollback invariants, role gating, and structured event metadata
 
 ## Remaining TODO (Proposed)
 
 - split resident request from execution work order if one resident issue must spawn multiple contractor tracks
 - add a first-class visit/appointment entity instead of representing scheduling only as status plus timeline events
 - decide whether the legacy `admin` umbrella role should remain long term or be fully replaced by capability-style permissions
+
+## Run Log: `2026-03-19 15:12:17 +11:00`
+
+### Delivered In This Run
+
+- scanned commits since automation `Last run: 2026-03-19T04:00:56.070Z`.
+- reviewed concrete commit evidence:
+  - `9c0a0b5397318d6d2a97774ade77e73de0ed0482`
+  - `f7877bd00ca0e4837f82db0364d73bcde83310ab`
+- validated resident-reported problem flow coverage by test intent review (`create -> assign -> triage -> schedule -> in_progress -> completed`) and edge cases (direct independent contractor dispatch, assignment clear rollback, role gating, follow-up reason requirements, mutual exclusivity guards).
+- updated documentation logs only; no README diagram changes were needed in this run.
+
+### Outcome
+
+- no additional minimal fix was applied because commit diffs did not provide strong concrete evidence of a new regression beyond the already-landed assignment-detail correction.
+- product TODO tracks `A2`, `A3`, and `A4` remain open and require implementation work plus executable runtime validation in an environment where `python -m pytest` can run.
 
 ## Run Log: `2026-03-19 17:20:00 +11:00`
 

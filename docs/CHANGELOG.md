@@ -6,6 +6,17 @@
 - Reviewer: `schema-test-automation`
 - Status: `active`
 
+## [0.4.2] - 2026-03-19 15:12:17 +11:00
+
+### Changed
+- performed schema-test automation evidence scan for commits since `2026-03-19T04:00:56.070Z`; reviewed `9c0a0b5397318d6d2a97774ade77e73de0ed0482` and `f7877bd00ca0e4837f82db0364d73bcde83310ab`.
+- verified resident->operations->contractor lifecycle and edge-case coverage against existing tests (`tests/test_app.py`, `tests/test_schema.py`) using static repository inspection.
+- refreshed backlog status notes in `docs/todo_implementation_checklist.md` for remaining product-track TODOs and current validation blocker.
+
+### Notes
+- no additional code fix was applied in this run because no new concrete regression was identified from commit diff evidence alone.
+- required runtime commands remain blocked in this sandbox (`python`/`py` unavailable; `.venv\\Scripts\\python.exe` execution denied), so this run is static/code-evidence verified only.
+
 ## [0.4.1] - 2026-03-19 15:04:12 +11:00
 
 ### Changed
