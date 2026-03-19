@@ -42,7 +42,7 @@
       <span class="status-pill">{{ job.status_label }}</span>
       <h3>{{ job.title }}</h3>
       <p class="muted">Resident: {{ job.created_by_name }}</p>
-      <p>{{ job.location }}</p>
+      <p>{{ job.asset_name or "Asset not captured" }} · {{ job.location }}</p>
       <p class="muted">Contractor: {{ job.assigned_org_name or "Unassigned" }}</p>
     </a>
     {% endfor %}

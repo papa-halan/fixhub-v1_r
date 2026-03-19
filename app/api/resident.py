@@ -18,6 +18,7 @@ from app.api.deps import (
     visible_jobs,
 )
 from app.models import User, UserRole
+from app.services import build_location_asset_catalog
 
 
 router = APIRouter(prefix="/resident")
@@ -35,6 +36,7 @@ def resident_report_page(
         session=session,
         current_user=current_user,
         template_name="resident_report.html",
+        location_catalog=build_location_asset_catalog(session, user=current_user),
     )
 
 

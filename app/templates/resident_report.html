@@ -5,18 +5,18 @@
   <div>
     <p class="eyebrow">Resident</p>
     <h1>Report an issue</h1>
-    <p>Keep the report short and concrete. FixHub will turn it into a shared job timeline that everyone can follow.</p>
+    <p>Keep the report short and concrete. FixHub will remember the location and asset so future issues can be logged faster.</p>
   </div>
   <div class="panel">
     <h2>What happens next</h2>
-    <p class="muted">You create the job. Admin assigns a contractor. The contractor adds updates. You watch the same event log the whole way through.</p>
+    <p class="muted">You create the job. Admin assigns a contractor. The contractor adds updates. The same location and asset stay attached to the timeline the whole way through.</p>
   </div>
 </section>
 
 <section class="panel">
   <div class="panel-header">
     <h2>Create Job</h2>
-    <p>Every new job starts with a single event: Report created.</p>
+    <p>Every new job starts with a single event: Report created. Previous locations and assets are suggested automatically.</p>
   </div>
   <form id="report-form" class="form-grid" method="post">
     <label>
@@ -25,12 +25,23 @@
     </label>
     <label>
       Location
-      <input type="text" name="location" placeholder="Block A, Room 14" required>
+      <input type="text" name="location" list="location-options" placeholder="Block A, Room 14" required>
+      <datalist id="location-options">
+        {% for location in location_catalog %}
+        <option value="{{ location.name }}"></option>
+        {% endfor %}
+      </datalist>
+    </label>
+    <label>
+      Asset
+      <input type="text" name="asset_name" list="asset-options" placeholder="Sink" required>
+      <datalist id="asset-options"></datalist>
     </label>
     <label>
       Description
       <textarea name="description" placeholder="Water is dripping steadily under the sink." required></textarea>
     </label>
+    <p class="muted form-helper">Examples: sink, tap, wardrobe hinge, shower door, ceiling light.</p>
     <div class="actions">
       <button class="button" type="submit">Submit issue</button>
     </div>
@@ -39,10 +50,35 @@
 </section>
 
 <script>
+  const rememberedLocationCatalog = {{ location_catalog | tojson }};
+  const assetOptionsByLocation = Object.fromEntries(
+    rememberedLocationCatalog.map((location) => [
+      location.name,
+      location.assets.map((asset) => asset.name),
+    ])
+  );
+  const locationInput = document.querySelector('[name="location"]');
+  const assetInput = document.querySelector('[name="asset_name"]');
+  const assetOptions = document.getElementById("asset-options");
+
+  const renderAssetOptions = () => {
+    const assets = assetOptionsByLocation[locationInput.value.trim()] || [];
+    assetOptions.innerHTML = "";
+    assets.forEach((assetName) => {
+      const option = document.createElement("option");
+      option.value = assetName;
+      assetOptions.appendChild(option);
+    });
+  };
+
+  locationInput.addEventListener("input", renderAssetOptions);
+  renderAssetOptions();
+
   FixHub.wireJsonForm(document.getElementById("report-form"), async (formData) => {
     const job = await FixHub.sendJson("/api/jobs", "POST", {
       title: formData.get("title"),
       location: formData.get("location"),
+      asset_name: formData.get("asset_name"),
       description: formData.get("description"),
     });
     window.location.href = `/resident/jobs/${job.id}`;

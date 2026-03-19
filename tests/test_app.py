@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import inspect, select
 
 from app.main import create_app
-from app.models import Event, Job, Organisation, OrganisationType, User, UserRole
+from app.models import Asset, Event, Job, Location, Organisation, OrganisationType, User, UserRole
 
 
 def auth_headers(email: str) -> dict[str, str]:
@@ -21,13 +21,13 @@ def build_client(tmp_path):
     return app, TestClient(app)
 
 
-def test_schema_only_contains_four_tables(tmp_path) -> None:
+def test_schema_includes_location_and_asset_tables(tmp_path) -> None:
     app, client = build_client(tmp_path)
 
     with client:
         table_names = set(inspect(app.state.engine).get_table_names())
 
-    assert table_names == {"events", "jobs", "organisations", "users"}
+    assert table_names == {"assets", "events", "jobs", "locations", "organisations", "users"}
 
 
 def test_api_surface_matches_mvp_scope(tmp_path) -> None:
@@ -257,6 +257,108 @@ def test_report_page_wires_post_form(tmp_path) -> None:
     assert 'script src="/static/app.js"></script>' in response.text
     assert 'body data-user-email="resident@fixhub.test"' in response.text
     assert 'form id="report-form" class="form-grid" method="post"' in response.text
+    assert 'name="asset_name"' in response.text
+    assert 'const rememberedLocationCatalog' in response.text
+
+
+def test_resident_report_page_shows_remembered_location_and_asset_suggestions(tmp_path) -> None:
+    _, client = build_client(tmp_path)
+
+    with client:
+        create_response = client.post(
+            "/api/jobs",
+            headers=auth_headers("resident@fixhub.test"),
+            json={
+                "title": "Leaking bathroom tap",
+                "description": "Water is pooling under the sink.",
+                "location": "Block A Room 14",
+                "asset_name": "Sink",
+            },
+        )
+        assert create_response.status_code == 201
+
+        response = client.get("/resident/report", headers=auth_headers("resident@fixhub.test"))
+
+    assert response.status_code == 200
+    assert 'value="Block A Room 14"' in response.text
+    assert "Sink" in response.text
+
+
+def test_job_and_events_persist_location_and_asset_context(tmp_path) -> None:
+    app, client = build_client(tmp_path)
+
+    with client:
+        contractor_me = client.get("/api/me", headers=auth_headers("contractor@fixhub.test"))
+        assert contractor_me.status_code == 200
+        contractor_org_id = contractor_me.json()["organisation_id"]
+
+        create_response = client.post(
+            "/api/jobs",
+            headers=auth_headers("resident@fixhub.test"),
+            json={
+                "title": "Leaking bathroom tap",
+                "description": "Water is pooling under the sink.",
+                "location": "Block A Room 14",
+                "asset_name": "Sink",
+            },
+        )
+        assert create_response.status_code == 201
+        job = create_response.json()
+
+        assert job["location"] == "Block A Room 14"
+        assert job["asset_name"] == "Sink"
+        assert job["location_id"] is not None
+        assert job["asset_id"] is not None
+
+        assign_response = client.patch(
+            f"/api/jobs/{job['id']}",
+            headers=auth_headers("admin@fixhub.test"),
+            json={"assigned_org_id": contractor_org_id},
+        )
+        assert assign_response.status_code == 200
+
+        event_response = client.post(
+            f"/api/jobs/{job['id']}/events",
+            headers=auth_headers("contractor@fixhub.test"),
+            json={"message": "Sink inspection booked"},
+        )
+        assert event_response.status_code == 201
+        assert event_response.json()["location_id"] == job["location_id"]
+        assert event_response.json()["asset_id"] == job["asset_id"]
+        assert event_response.json()["location"] == "Block A Room 14"
+        assert event_response.json()["asset_name"] == "Sink"
+
+        events_response = client.get(
+            f"/api/jobs/{job['id']}/events",
+            headers=auth_headers("resident@fixhub.test"),
+        )
+        assert events_response.status_code == 200
+        events = events_response.json()
+
+        assert {event["location_id"] for event in events} == {job["location_id"]}
+        assert {event["asset_id"] for event in events} == {job["asset_id"]}
+        assert {event["location"] for event in events} == {"Block A Room 14"}
+        assert {event["asset_name"] for event in events} == {"Sink"}
+
+        with app.state.SessionLocal() as session:
+            db_job = session.get(Job, uuid.UUID(job["id"]))
+            db_location = session.get(Location, uuid.UUID(job["location_id"]))
+            db_asset = session.get(Asset, uuid.UUID(job["asset_id"]))
+            db_events = list(
+                session.scalars(
+                    select(Event).where(Event.job_id == db_job.id).order_by(Event.created_at.asc())
+                )
+            )
+
+        assert db_job is not None
+        assert db_location is not None
+        assert db_asset is not None
+        assert db_job.location_id == db_location.id
+        assert db_job.asset_id == db_asset.id
+        assert db_location.user_id == db_job.created_by
+        assert db_asset.location_id == db_location.id
+        assert {event.location_id for event in db_events} == {db_location.id}
+        assert {event.asset_id for event in db_events} == {db_asset.id}
 
 
 def test_admin_assignment_form_can_submit_null_org_id(tmp_path) -> None:
@@ -1048,3 +1150,312 @@ def test_admin_can_reassign_job_while_in_progress_without_handoff_status(tmp_pat
 
     assert "Marked job in progress" in messages
     assert "Reassigned Rapid Facilities Group" in messages
+
+
+def test_admin_can_close_unassigned_in_progress_job_after_contractor_loses_access(tmp_path) -> None:
+    _, client = build_client(tmp_path)
+
+    with client:
+        contractor_me = client.get("/api/me", headers=auth_headers("contractor@fixhub.test"))
+        assert contractor_me.status_code == 200
+        contractor_org_id = contractor_me.json()["organisation_id"]
+
+        create_response = client.post(
+            "/api/jobs",
+            headers=auth_headers("resident@fixhub.test"),
+            json={
+                "title": "Laundry room drain backing up",
+                "description": "Water is spilling onto the floor near machines.",
+                "location": "Block T Laundry",
+            },
+        )
+        assert create_response.status_code == 201
+        job_id = create_response.json()["id"]
+
+        assign_response = client.patch(
+            f"/api/jobs/{job_id}",
+            headers=auth_headers("admin@fixhub.test"),
+            json={"assigned_org_id": contractor_org_id},
+        )
+        assert assign_response.status_code == 200
+
+        progress_response = client.patch(
+            f"/api/jobs/{job_id}",
+            headers=auth_headers("contractor@fixhub.test"),
+            json={"status": "in_progress"},
+        )
+        assert progress_response.status_code == 200
+        assert progress_response.json()["status"] == "in_progress"
+
+        clear_response = client.patch(
+            f"/api/jobs/{job_id}",
+            headers=auth_headers("admin@fixhub.test"),
+            json={"assigned_org_id": None},
+        )
+        assert clear_response.status_code == 200
+        assert clear_response.json()["status"] == "in_progress"
+        assert clear_response.json()["assigned_org_id"] is None
+
+        contractor_complete_attempt = client.patch(
+            f"/api/jobs/{job_id}",
+            headers=auth_headers("contractor@fixhub.test"),
+            json={"status": "completed"},
+        )
+        assert contractor_complete_attempt.status_code == 403
+        assert contractor_complete_attempt.json() == {"detail": "You cannot access this job"}
+
+        admin_complete_response = client.patch(
+            f"/api/jobs/{job_id}",
+            headers=auth_headers("admin@fixhub.test"),
+            json={"status": "completed"},
+        )
+        assert admin_complete_response.status_code == 200
+        assert admin_complete_response.json()["status"] == "completed"
+        assert admin_complete_response.json()["assigned_org_id"] is None
+
+        resident_view = client.get(f"/api/jobs/{job_id}", headers=auth_headers("resident@fixhub.test"))
+        assert resident_view.status_code == 200
+        assert resident_view.json()["status"] == "completed"
+        assert resident_view.json()["assigned_org_id"] is None
+
+        events_response = client.get(
+            f"/api/jobs/{job_id}/events",
+            headers=auth_headers("resident@fixhub.test"),
+        )
+        assert events_response.status_code == 200
+        messages = [event["message"] for event in events_response.json()]
+
+    assert "Assignment cleared" in messages
+    assert "Marked job completed" in messages
+
+
+def test_single_admin_role_cannot_distinguish_reception_triage_and_coordinator_actions(tmp_path) -> None:
+    _, client = build_client(tmp_path)
+
+    with client:
+        contractor_me = client.get("/api/me", headers=auth_headers("contractor@fixhub.test"))
+        assert contractor_me.status_code == 200
+        contractor_org_id = contractor_me.json()["organisation_id"]
+
+        create_response = client.post(
+            "/api/jobs",
+            headers=auth_headers("resident@fixhub.test"),
+            json={
+                "title": "Entry door lock sticks",
+                "description": "The lock jams and needs force to open.",
+                "location": "Block U Room 2",
+            },
+        )
+        assert create_response.status_code == 201
+        job_id = create_response.json()["id"]
+
+        assign_response = client.patch(
+            f"/api/jobs/{job_id}",
+            headers=auth_headers("admin@fixhub.test"),
+            json={"assigned_org_id": contractor_org_id},
+        )
+        assert assign_response.status_code == 200
+
+        complete_response = client.patch(
+            f"/api/jobs/{job_id}",
+            headers=auth_headers("admin@fixhub.test"),
+            json={"status": "completed"},
+        )
+        assert complete_response.status_code == 200
+        assert complete_response.json()["status"] == "completed"
+
+        events_response = client.get(
+            f"/api/jobs/{job_id}/events",
+            headers=auth_headers("resident@fixhub.test"),
+        )
+        assert events_response.status_code == 200
+        events = events_response.json()
+
+    admin_events = [event for event in events if event["actor_name"] == "Avery Admin"]
+    assert len(admin_events) >= 2
+    assert {"admin"} == {event["actor_role"] for event in admin_events}
+    assert {"Student Living"} == {event["organisation_name"] for event in admin_events}
+    assert {"Avery Admin (Admin, Student Living)"} == {event["actor_label"] for event in admin_events}
+
+
+def test_contractor_can_add_execution_note_after_completion_without_reopen_state(tmp_path) -> None:
+    _, client = build_client(tmp_path)
+
+    with client:
+        contractor_me = client.get("/api/me", headers=auth_headers("contractor@fixhub.test"))
+        assert contractor_me.status_code == 200
+        contractor_org_id = contractor_me.json()["organisation_id"]
+
+        create_response = client.post(
+            "/api/jobs",
+            headers=auth_headers("resident@fixhub.test"),
+            json={
+                "title": "Kitchen exhaust fan noisy",
+                "description": "Fan rattles and vibrates loudly on startup.",
+                "location": "Block V Shared Kitchen",
+            },
+        )
+        assert create_response.status_code == 201
+        job_id = create_response.json()["id"]
+
+        assign_response = client.patch(
+            f"/api/jobs/{job_id}",
+            headers=auth_headers("admin@fixhub.test"),
+            json={"assigned_org_id": contractor_org_id},
+        )
+        assert assign_response.status_code == 200
+
+        progress_response = client.patch(
+            f"/api/jobs/{job_id}",
+            headers=auth_headers("contractor@fixhub.test"),
+            json={"status": "in_progress"},
+        )
+        assert progress_response.status_code == 200
+
+        complete_response = client.patch(
+            f"/api/jobs/{job_id}",
+            headers=auth_headers("contractor@fixhub.test"),
+            json={"status": "completed"},
+        )
+        assert complete_response.status_code == 200
+        assert complete_response.json()["status"] == "completed"
+
+        post_completion_note = client.post(
+            f"/api/jobs/{job_id}/events",
+            headers=auth_headers("contractor@fixhub.test"),
+            json={"message": "Returning tomorrow to retighten mount bolts"},
+        )
+        assert post_completion_note.status_code == 201
+        assert post_completion_note.json()["message"] == "Returning tomorrow to retighten mount bolts"
+
+        resident_view = client.get(f"/api/jobs/{job_id}", headers=auth_headers("resident@fixhub.test"))
+        assert resident_view.status_code == 200
+        assert resident_view.json()["status"] == "completed"
+
+        events_response = client.get(
+            f"/api/jobs/{job_id}/events",
+            headers=auth_headers("resident@fixhub.test"),
+        )
+        assert events_response.status_code == 200
+        messages = [event["message"] for event in events_response.json()]
+
+    assert "Marked job completed" in messages
+    assert "Returning tomorrow to retighten mount bolts" in messages
+
+
+def test_admin_can_move_assigned_job_to_in_progress_without_contractor_action(tmp_path) -> None:
+    _, client = build_client(tmp_path)
+
+    with client:
+        contractor_me = client.get("/api/me", headers=auth_headers("contractor@fixhub.test"))
+        assert contractor_me.status_code == 200
+        contractor_org_id = contractor_me.json()["organisation_id"]
+
+        create_response = client.post(
+            "/api/jobs",
+            headers=auth_headers("resident@fixhub.test"),
+            json={
+                "title": "Bathroom extractor fan not starting",
+                "description": "Fan does not start even with lights on.",
+                "location": "Block W Room 10",
+            },
+        )
+        assert create_response.status_code == 201
+        job_id = create_response.json()["id"]
+
+        assign_response = client.patch(
+            f"/api/jobs/{job_id}",
+            headers=auth_headers("admin@fixhub.test"),
+            json={"assigned_org_id": contractor_org_id},
+        )
+        assert assign_response.status_code == 200
+        assert assign_response.json()["status"] == "assigned"
+
+        admin_progress_response = client.patch(
+            f"/api/jobs/{job_id}",
+            headers=auth_headers("admin@fixhub.test"),
+            json={"status": "in_progress"},
+        )
+        assert admin_progress_response.status_code == 200
+        assert admin_progress_response.json()["status"] == "in_progress"
+
+        events_response = client.get(
+            f"/api/jobs/{job_id}/events",
+            headers=auth_headers("resident@fixhub.test"),
+        )
+        assert events_response.status_code == 200
+        events = events_response.json()
+
+    assert "Marked job in progress" in [event["message"] for event in events]
+    in_progress_event = next(event for event in events if event["message"] == "Marked job in progress")
+    assert in_progress_event["actor_name"] == "Avery Admin"
+    assert in_progress_event["actor_role"] == "admin"
+
+
+def test_resident_full_jlc_timeline_lacks_typed_responsibility_stage_metadata(tmp_path) -> None:
+    _, client = build_client(tmp_path)
+
+    with client:
+        contractor_me = client.get("/api/me", headers=auth_headers("contractor@fixhub.test"))
+        assert contractor_me.status_code == 200
+        contractor_org_id = contractor_me.json()["organisation_id"]
+
+        create_response = client.post(
+            "/api/jobs",
+            headers=auth_headers("resident@fixhub.test"),
+            json={
+                "title": "Heating unit cycling off",
+                "description": "Heater turns off after two minutes.",
+                "location": "Block X Room 9",
+            },
+        )
+        assert create_response.status_code == 201
+        job_id = create_response.json()["id"]
+
+        assign_response = client.patch(
+            f"/api/jobs/{job_id}",
+            headers=auth_headers("admin@fixhub.test"),
+            json={"assigned_org_id": contractor_org_id},
+        )
+        assert assign_response.status_code == 200
+
+        admin_progress_response = client.patch(
+            f"/api/jobs/{job_id}",
+            headers=auth_headers("admin@fixhub.test"),
+            json={"status": "in_progress"},
+        )
+        assert admin_progress_response.status_code == 200
+
+        contractor_complete_response = client.patch(
+            f"/api/jobs/{job_id}",
+            headers=auth_headers("contractor@fixhub.test"),
+            json={"status": "completed"},
+        )
+        assert contractor_complete_response.status_code == 200
+
+        events_response = client.get(
+            f"/api/jobs/{job_id}/events",
+            headers=auth_headers("resident@fixhub.test"),
+        )
+        assert events_response.status_code == 200
+        events = events_response.json()
+
+    timeline_messages = [event["message"] for event in events]
+    assert "Assigned Newcastle Plumbing" in timeline_messages
+    assert "Marked job assigned" in timeline_messages
+    assert "Marked job in progress" in timeline_messages
+    assert "Marked job completed" in timeline_messages
+
+    responsibility_events = [
+        event
+        for event in events
+        if event["message"] in {
+            "Assigned Newcastle Plumbing",
+            "Marked job assigned",
+            "Marked job in progress",
+            "Marked job completed",
+        }
+    ]
+    assert len(responsibility_events) == 4
+    assert {event["actor_role"] for event in responsibility_events} == {"admin", "contractor"}
+    assert all("responsibility_stage" not in event for event in responsibility_events)

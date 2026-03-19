@@ -21,6 +21,10 @@ class EventCreate(SchemaModel):
 class EventRead(SchemaModel):
     id: uuid.UUID
     job_id: uuid.UUID
+    location_id: uuid.UUID | None = None
+    location: str | None = None
+    asset_id: uuid.UUID | None = None
+    asset_name: str | None = None
     actor_user_id: uuid.UUID | None = None
     actor_org_id: uuid.UUID | None = None
     actor_name: str

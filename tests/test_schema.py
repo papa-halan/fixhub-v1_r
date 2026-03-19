@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from app.main import create_app
+from app.models import Job, Organisation, OrganisationType, User, UserRole
 from app.schema import EventCreate, EventRead, JobCreate, JobRead, JobUpdate, UserRead
 
 
@@ -24,9 +25,11 @@ def test_schema_package_contains_expected_source_files() -> None:
     assert schema_dir.is_dir()
     assert {path.name for path in schema_dir.glob("*.py")} >= {
         "__init__.py",
+        "asset.py",
         "base.py",
         "event.py",
         "job.py",
+        "location.py",
         "organisation.py",
         "user.py",
     }
@@ -75,10 +78,12 @@ def test_request_schemas_strip_and_validate_text_fields() -> None:
         title="  Leaking bathroom tap  ",
         description="  Water is pooling under the sink.  ",
         location="  Block A Room 14  ",
+        asset_name="  Sink  ",
     )
     assert job.title == "Leaking bathroom tap"
     assert job.description == "Water is pooling under the sink."
     assert job.location == "Block A Room 14"
+    assert job.asset_name == "Sink"
 
     event = EventCreate(message="  Scheduled visit tomorrow 10am  ")
     assert event.message == "Scheduled visit tomorrow 10am"
@@ -89,6 +94,9 @@ def test_request_schemas_strip_and_validate_text_fields() -> None:
     with pytest.raises(ValidationError, match="message cannot be blank"):
         EventCreate(message="   ")
 
+    with pytest.raises(ValidationError, match="asset_name cannot be blank"):
+        JobCreate(title="valid", description="valid", location="valid", asset_name="   ")
+
     with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
         JobCreate(
             title="Leaking bathroom tap",
@@ -96,3 +104,35 @@ def test_request_schemas_strip_and_validate_text_fields() -> None:
             location="Block A Room 14",
             unexpected="value",
         )
+
+
+def test_user_role_enum_remains_coarse_for_student_living_operational_responsibilities() -> None:
+    assert {role.value for role in UserRole} == {"resident", "admin", "contractor"}
+
+
+def test_job_assignment_surface_is_org_only_for_contractor_dispatch() -> None:
+    job_columns = set(Job.__table__.columns.keys())
+
+    assert "assigned_org_id" in job_columns
+    assert "assigned_user_id" not in job_columns
+
+
+def test_organisation_schema_cannot_represent_university_to_student_living_hierarchy() -> None:
+    organisation_columns = set(Organisation.__table__.columns.keys())
+    user_columns = set(User.__table__.columns.keys())
+
+    assert "organisation_id" in user_columns
+    assert "parent_org_id" not in organisation_columns
+    assert "root_org_id" not in organisation_columns
+
+
+def test_organisation_type_enum_cannot_distinguish_maintenance_team_from_external_contractor_org() -> None:
+    assert {org_type.value for org_type in OrganisationType} == {"university", "contractor"}
+
+
+def test_user_schema_lacks_student_living_operational_responsibility_fields() -> None:
+    user_columns = set(User.__table__.columns.keys())
+
+    assert "role" in user_columns
+    assert "responsibility_stage" not in user_columns
+    assert "capability_flags" not in user_columns

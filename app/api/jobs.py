@@ -21,6 +21,7 @@ from app.api.deps import (
 )
 from app.models import Job, JobStatus, Organisation, OrganisationType, User, UserRole
 from app.schema import EventCreate, EventRead, JobCreate, JobRead, JobUpdate, UserRead
+from app.services import find_or_create_asset, find_or_create_location
 
 
 router = APIRouter(prefix="/api")
@@ -38,10 +39,16 @@ def create_job(
     current_user: User = Depends(get_current_user),
 ):
     require_role(current_user, UserRole.resident)
+    location_name = clean_text(payload.location, "location")
+    location = find_or_create_location(session, user=current_user, name=location_name)
+    asset_name = clean_text(payload.asset_name or payload.title, "asset_name")
+    asset = find_or_create_asset(session, location=location, name=asset_name)
     job = Job(
         title=clean_text(payload.title, "title"),
         description=clean_text(payload.description, "description"),
-        location=clean_text(payload.location, "location"),
+        location=location_name,
+        location_id=location.id,
+        asset_id=asset.id,
         status=JobStatus.new,
         created_by=current_user.id,
     )

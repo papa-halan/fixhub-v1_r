@@ -1,6 +1,6 @@
 # FixHub MVP
 
-FixHub is a small maintenance-log app built around two entities: `jobs` and `events`.
+FixHub is a small maintenance-log app built around `jobs` and `events`, with a persistent location/asset catalog behind each report.
 
 The live concept is simple:
 - residents create jobs
@@ -11,6 +11,8 @@ The live concept is simple:
 ## Scope
 
 Database tables:
+- `locations`
+- `assets`
 - `users`
 - `organisations`
 - `jobs`
@@ -34,12 +36,34 @@ Pages:
 - `/contractor/jobs`
 - `/contractor/jobs/{job_id}`
 
+## Code Layout
+
+- `app/models/`: SQLAlchemy models for database persistence.
+- `app/schema/`: Pydantic request/response models for the API contract.
+- `app/services/`: domain helpers for demo data and remembered location/asset catalog behavior.
+- `app/api/`: FastAPI route modules for API and page handlers.
+- `app/main.py`: application wiring and router registration.
+
 ## Diagrams
 
 ### ER Diagram
 
 ```mermaid
 erDiagram
+    LOCATIONS {
+        uuid id PK
+        uuid user_id FK
+        text name
+        timestamptz created_at
+    }
+
+    ASSETS {
+        uuid id PK
+        uuid location_id FK
+        text name
+        timestamptz created_at
+    }
+
     ORGANISATIONS {
         uuid id PK
         text name UK
@@ -61,6 +85,8 @@ erDiagram
         text title
         text description
         text location
+        uuid location_id FK
+        uuid asset_id FK
         enum status
         uuid created_by FK
         uuid assigned_org_id FK
@@ -73,10 +99,18 @@ erDiagram
         uuid job_id FK
         uuid actor_user_id FK
         uuid actor_org_id FK
+        uuid location_id FK
+        uuid asset_id FK
         text message
         timestamptz created_at
     }
 
+    USERS ||--o{ LOCATIONS : remembers
+    LOCATIONS ||--o{ ASSETS : contains
+    LOCATIONS ||--o{ JOBS : reported_at
+    ASSETS ||--o{ JOBS : reported_on
+    LOCATIONS ||--o{ EVENTS : context_for
+    ASSETS ||--o{ EVENTS : context_for
     ORGANISATIONS ||--o{ USERS : has
     ORGANISATIONS ||--o{ JOBS : assigned_to
     USERS ||--o{ JOBS : creates
@@ -100,6 +134,8 @@ flowchart LR
 
     Jobs[(jobs)]
     Events[(events)]
+    Locations[(locations)]
+    Assets[(assets)]
     Users[(users)]
     Orgs[(organisations)]
 
@@ -113,16 +149,22 @@ flowchart LR
 
     ResidentAPI --> Jobs
     ResidentAPI --> Events
+    ResidentAPI --> Locations
+    ResidentAPI --> Assets
     ResidentAPI --> Users
     ResidentAPI --> Orgs
 
     AdminAPI --> Jobs
     AdminAPI --> Events
+    AdminAPI --> Locations
+    AdminAPI --> Assets
     AdminAPI --> Users
     AdminAPI --> Orgs
 
     ContractorAPI --> Jobs
     ContractorAPI --> Events
+    ContractorAPI --> Locations
+    ContractorAPI --> Assets
     ContractorAPI --> Users
     ContractorAPI --> Orgs
 
@@ -143,14 +185,15 @@ flowchart TB
     end
 
     subgraph FastAPI["FastAPI app"]
-        Routes["API + page routes (app/main.py)"]
+        Routes["API + page routes (app/api)"]
+        Schemas["Pydantic API schemas (app/schema)"]
         Auth["Header/cookie user context"]
         Domain["Job + event domain logic"]
     end
 
     subgraph Data["Persistence"]
         PG[("PostgreSQL")]
-        Tables["users / organisations / jobs / events"]
+        Tables["users / organisations / locations / assets / jobs / events"]
     end
 
     Browser --> ResidentPage
@@ -162,6 +205,7 @@ flowchart TB
     ContractorPage --> Routes
 
     Routes --> Auth
+    Routes --> Schemas
     Routes --> Domain
     Domain --> PG
     PG --> Tables
@@ -291,6 +335,8 @@ Timestamp: `2026-03-13 23:17:31 +11:00`
 ## Notes
 
 - The app auto-seeds demo organisations and users.
+- API request/response contracts live in `app/schema`, while persistence models live in `app/models`.
+- Residents now report against both a location and an asset, and that pair is remembered for future reports.
 - The UI is server-rendered and reuses one `EventTimeline` partial across roles.
 - Authentication is intentionally lightweight for the demo: explicit demo sign-in in the UI, cookie switching after sign-in, and `X-User-Email` for API use.
 

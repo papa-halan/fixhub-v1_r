@@ -69,6 +69,8 @@ def job_query():
         select(Job)
         .options(
             joinedload(Job.creator).joinedload(User.organisation),
+            joinedload(Job.location_record),
+            joinedload(Job.asset),
             joinedload(Job.assigned_org),
         )
         .order_by(Job.updated_at.desc(), Job.created_at.desc())
@@ -80,8 +82,12 @@ def event_query(job_id: uuid.UUID):
         select(Event)
         .where(Event.job_id == job_id)
         .options(
+            joinedload(Event.job).joinedload(Job.location_record),
+            joinedload(Event.job).joinedload(Job.asset),
             joinedload(Event.actor_user).joinedload(User.organisation),
             joinedload(Event.actor_org),
+            joinedload(Event.location_record),
+            joinedload(Event.asset),
         )
         .order_by(Event.created_at.asc())
     )
@@ -205,12 +211,43 @@ def serialize_user(user: User) -> dict[str, object]:
     }
 
 
+def job_location_name(job: Job) -> str:
+    if job.location_record:
+        return job.location_record.name
+    return job.location
+
+
+def job_asset_name(job: Job) -> str | None:
+    if job.asset:
+        return job.asset.name
+    return None
+
+
+def event_location_name(event: Event) -> str | None:
+    if event.location_record:
+        return event.location_record.name
+    if event.job:
+        return job_location_name(event.job)
+    return None
+
+
+def event_asset_name(event: Event) -> str | None:
+    if event.asset:
+        return event.asset.name
+    if event.job:
+        return job_asset_name(event.job)
+    return None
+
+
 def serialize_job(job: Job) -> dict[str, object]:
     return {
         "id": job.id,
         "title": job.title,
         "description": job.description,
-        "location": job.location,
+        "location": job_location_name(job),
+        "location_id": job.location_id,
+        "asset_id": job.asset_id,
+        "asset_name": job_asset_name(job),
         "status": job.status.value,
         "status_label": job.status.value.replace("_", " ").title(),
         "created_by": job.created_by,
@@ -227,6 +264,10 @@ def serialize_event(event: Event) -> dict[str, object]:
     return {
         "id": event.id,
         "job_id": event.job_id,
+        "location_id": event.location_id or (event.job.location_id if event.job else None),
+        "location": event_location_name(event),
+        "asset_id": event.asset_id or (event.job.asset_id if event.job else None),
+        "asset_name": event_asset_name(event),
         "actor_user_id": event.actor_user_id,
         "actor_org_id": event.actor_org_id,
         "actor_name": actor_name(event),
@@ -314,6 +355,8 @@ def append_event(session: Session, *, job: Job, actor: User, message: str) -> Ev
         job_id=job.id,
         actor_user_id=actor.id,
         actor_org_id=actor.organisation_id,
+        location_id=job.location_id,
+        asset_id=job.asset_id,
         message=message,
         created_at=datetime.now(timezone.utc),
     )

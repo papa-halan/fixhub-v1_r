@@ -1,5 +1,33 @@
 # Documentation Changelog
 
+## [0.3.5] - 2026-03-15 18:31:34 +11:00
+
+### Added
+- documentation for persistent `locations` and `assets` catalog support in the schema/workflow assessment.
+
+### Changed
+- updated `README.md` scope, ER diagram, flow diagram, architecture diagram, and notes to reflect the location/asset catalog.
+- refreshed `docs/README.md` timestamp and diagram coverage note for the expanded schema.
+- refreshed `docs/schema_student_living_assessment.md` baseline and validation evidence to reflect six tables and 28 passing schema/app tests.
+
+### Notes
+- current codebase now persists resident-reported location/asset context across jobs and events.
+
+## [0.3.4] - 2026-03-15 18:16:11 +11:00
+
+### Added
+- current-state documentation of the dedicated `app/schema` package and its role in the API contract.
+- manual schema-doc sync run log in `docs/schema_student_living_assessment.md` with passing runtime verification evidence.
+
+### Changed
+- updated `README.md` to document `app/models` vs `app/schema` responsibilities and include the schema layer in the architecture diagram.
+- refreshed `docs/README.md` verification status to reflect green schema/app pytest coverage in this environment.
+- refreshed `docs/schema_student_living_assessment.md` scope, baseline notes, and validation evidence to match the current codebase.
+
+### Notes
+- current codebase separates persistence models (`app/models`) from API schemas (`app/schema`).
+- runtime verification succeeded for the synced schema/app suite (`24 passed` across `tests/test_schema.py` and `tests/test_app.py`).
+
 ## [0.3.3] - 2026-03-15 17:30:56 +11:00
 
 ### Added

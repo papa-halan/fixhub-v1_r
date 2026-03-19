@@ -13,6 +13,7 @@ from app.models.enums import UserRole
 if TYPE_CHECKING:
     from app.models.event import Event
     from app.models.job import Job
+    from app.models.location import Location
     from app.models.organisation import Organisation
 
 
@@ -40,6 +41,10 @@ class User(Base):
     created_jobs: Mapped[list[Job]] = relationship(
         back_populates="creator",
         foreign_keys="Job.created_by",
+    )
+    locations: Mapped[list[Location]] = relationship(
+        back_populates="user",
+        order_by="Location.name",
     )
     events: Mapped[list[Event]] = relationship(
         back_populates="actor_user",

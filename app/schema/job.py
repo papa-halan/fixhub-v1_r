@@ -13,10 +13,18 @@ class JobCreate(SchemaModel):
     title: str
     description: str
     location: str
+    asset_name: str | None = None
 
     @field_validator("title", "description", "location")
     @classmethod
     def validate_text(cls, value: str, info: ValidationInfo) -> str:
+        return strip_non_blank(value, info.field_name)
+
+    @field_validator("asset_name")
+    @classmethod
+    def validate_asset_name(cls, value: str | None, info: ValidationInfo) -> str | None:
+        if value is None:
+            return None
         return strip_non_blank(value, info.field_name)
 
 
@@ -30,6 +38,9 @@ class JobRead(SchemaModel):
     title: str
     description: str
     location: str
+    location_id: uuid.UUID | None = None
+    asset_id: uuid.UUID | None = None
+    asset_name: str | None = None
     status: JobStatus
     status_label: str
     created_by: uuid.UUID
