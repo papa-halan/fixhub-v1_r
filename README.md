@@ -138,6 +138,33 @@ Supported job states:
 
 ## Auth And Run Modes
 
+## Local Migrations
+
+Alembic now resolves the database target the same way as app startup:
+
+- if `DATABASE_URL` is set, both Alembic and the app use it
+- if `DATABASE_URL` is unset, both use the repo-local SQLite database at `fixhub.db`
+- `FIXHUB_DEMO_MODE` controls demo seeding and UI shortcuts only; it does not switch databases
+- Postgres targets default to `connect_timeout=5` unless `DATABASE_URL` already provides one
+
+For the default local SQLite workflow:
+
+```powershell
+pip install -e .[dev]
+Remove-Item Env:DATABASE_URL -ErrorAction SilentlyContinue
+$env:FIXHUB_DEMO_MODE = "1"
+alembic upgrade head
+```
+
+For a local Postgres workflow, start the database first and set `DATABASE_URL` explicitly:
+
+```powershell
+docker compose up db
+$env:DATABASE_URL = "postgresql+psycopg://postgres:postgres@localhost:5432/fixhub"
+$env:FIXHUB_DEMO_MODE = "1"
+alembic upgrade head
+```
+
 ### Demo Mode
 
 Use demo mode for local verification with seeded organisations, users, locations, and assets.
