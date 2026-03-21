@@ -22,6 +22,13 @@ class ContractorMode(str, Enum):
     external_contractor = "external_contractor"
 
 
+class LocationType(str, Enum):
+    site = "site"
+    building = "building"
+    space = "space"
+    unit = "unit"
+
+
 class JobStatus(str, Enum):
     new = "new"
     assigned = "assigned"

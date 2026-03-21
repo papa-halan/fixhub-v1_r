@@ -19,6 +19,12 @@
           <span>Location</span>
           <strong>{{ job.location }}</strong>
         </div>
+        {% if job.location_detail_text %}
+        <div class="meta-item">
+          <span>Location detail</span>
+          <strong>{{ job.location_detail_text }}</strong>
+        </div>
+        {% endif %}
         <div class="meta-item">
           <span>Asset</span>
           <strong>{{ job.asset_name or "Not captured" }}</strong>

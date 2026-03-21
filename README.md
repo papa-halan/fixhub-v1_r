@@ -1,13 +1,30 @@
 # FixHub MVP
 
-FixHub is a maintenance workflow demo for a resident -> operations -> contractor lifecycle. The current model supports Student Living-style triage, scheduling, direct independent-contractor dispatch, organisation-backed contractor dispatch, and accountability metadata on timeline events.
+FixHub is a maintenance workflow demo for a resident -> operations -> contractor lifecycle. Phase 0 stabilizes boot, schema authority, and auth boundaries. Phase 0.5 adds the minimum organisation and location structure needed to keep the current reporting flow valid without starting the larger Phase 1 request/work-order split.
+
+## Phase 0 Status
+
+- Alembic migrations are the schema authority.
+- App startup fails fast if the database is not at Alembic head.
+- Runtime does not call `Base.metadata.create_all()`.
+- Auth is password login plus signed cookie sessions.
+- Demo users and shortcut switching are available only when `FIXHUB_DEMO_MODE=1`.
+
+## Phase 0.5 Foundation
+
+- `users.organisation_id` is the primary org boundary for the current deployment.
+- `locations` belong to an organisation and now support `parent_id` plus typed hierarchy (`site`, `building`, `space`, `unit`).
+- `jobs.organisation_id` is stored directly.
+- Resident report creation uses `location_id` as the operational source of truth.
+- `location_detail_text` is optional descriptive text only.
+- Resident and operations access stays org-scoped, while contractor visibility stays tied to explicit dispatch.
 
 ## Current Workflow
 
-- residents create jobs with remembered `location` and `asset` context
+- residents sign in and create a job against a managed location in their organisation
 - operations users coordinate intake, triage, scheduling, escalation, and follow-up
 - contractors move work through execution states
-- everyone reads the same shared timeline, now with typed event metadata
+- everyone reads the same shared timeline, with typed event metadata and stable location context
 
 ## Roles
 
@@ -17,42 +34,6 @@ FixHub is a maintenance workflow demo for a resident -> operations -> contractor
 - `triage_officer`
 - `coordinator`
 - `contractor`
-
-## Scope
-
-Database tables:
-- `locations`
-- `assets`
-- `users`
-- `organisations`
-- `jobs`
-- `events`
-
-Core API routes:
-- `GET /api/me`
-- `POST /api/jobs`
-- `GET /api/jobs`
-- `GET /api/jobs/{job_id}`
-- `PATCH /api/jobs/{job_id}`
-- `GET /api/jobs/{job_id}/events`
-- `POST /api/jobs/{job_id}/events`
-
-Server-rendered pages:
-- `/resident/report`
-- `/resident/jobs`
-- `/resident/jobs/{job_id}`
-- `/admin/jobs`
-- `/admin/jobs/{job_id}`
-- `/contractor/jobs`
-- `/contractor/jobs/{job_id}`
-
-## Code Layout
-
-- `app/models/`: SQLAlchemy persistence models and enums
-- `app/schema/`: Pydantic request and response contracts
-- `app/services/`: workflow/state-machine rules plus demo data and catalog helpers
-- `app/api/`: API and page routers plus shared dependency helpers
-- `alembic/versions/`: schema migrations
 
 ## Data Model
 
@@ -71,7 +52,9 @@ erDiagram
         uuid id PK
         text name
         text email UK
+        text password_hash
         enum role
+        bool is_demo_account
         uuid organisation_id FK
         timestamptz created_at
     }
@@ -79,7 +62,9 @@ erDiagram
     LOCATIONS {
         uuid id PK
         uuid organisation_id FK
+        uuid parent_id FK
         text name
+        enum type
         timestamptz created_at
     }
 
@@ -95,8 +80,10 @@ erDiagram
         text title
         text description
         text location_snapshot
+        text location_detail_text
         enum status
         uuid created_by FK
+        uuid organisation_id FK
         uuid location_id FK
         uuid asset_id FK
         uuid assigned_org_id FK
@@ -117,13 +104,16 @@ erDiagram
         text reason_code
         enum responsibility_stage
         enum owner_scope
+        enum responsibility_owner
         timestamptz created_at
     }
 
     ORGANISATIONS ||--o{ ORGANISATIONS : parent_of
     ORGANISATIONS ||--o{ USERS : has
     ORGANISATIONS ||--o{ LOCATIONS : owns
+    LOCATIONS ||--o{ LOCATIONS : contains
     LOCATIONS ||--o{ ASSETS : contains
+    ORGANISATIONS ||--o{ JOBS : owns
     LOCATIONS ||--o{ JOBS : reported_at
     ASSETS ||--o{ JOBS : reported_on
     ORGANISATIONS ||--o{ JOBS : assigned_org
@@ -133,8 +123,6 @@ erDiagram
 ```
 
 ## Lifecycle
-
-### Business-Level State Diagram
 
 ```mermaid
 stateDiagram-v2
@@ -164,25 +152,44 @@ stateDiagram-v2
     cancelled --> [*]
 ```
 
-### Guard Conditions And Side Effects
+## Guard Conditions
 
 | Rule | Applies to | Effect |
 | --- | --- | --- |
 | Assignee required | `assigned`, `scheduled`, `in_progress`, `blocked`, `completed`, `follow_up_scheduled` | Transition is rejected unless `assigned_org_id` or `assigned_contractor_user_id` is set |
 | Assignment exclusivity | assignment updates | `assigned_org_id` and `assigned_contractor_user_id` cannot both be non-null |
-| Assignment clear rollback | clearing the last assignee without an explicit status change | job moves back to `new` or `triaged` instead of remaining unassigned in an execution state |
+| Assignment clear rollback | clearing the last assignee without an explicit status change | job moves back to `new` or `triaged` instead of staying unassigned in an execution state |
 | Triage permission | `triaged`, `scheduled`, `follow_up_scheduled` | only `triage_officer` or `admin` can move jobs into these states |
 | Assignment permission | assignment field changes | only `coordinator` or `admin` can change dispatch target |
-| Execution permission | `in_progress`, `blocked`, `completed` | contractor handles normal execution updates; moving to `completed` now requires an explicit `reason_code` or `responsibility_stage` |
-| Accountability metadata | `on_hold`, `blocked`, `cancelled`, `reopened`, `follow_up_scheduled`, `escalated`, `completed` | branch states require `reason_code`; completion requires explicit accountability metadata and the resulting event stores `event_type`, `responsibility_stage`, and `owner_scope` |
+| Completion accountability | `completed` | completion requires explicit accountability metadata |
+| Same-org report validation | resident report creation | `location_id` must belong to the acting user organisation and be a reportable location type |
 
-## Assignment Semantics
+## Auth And Demo Mode
 
-- `assigned_org_id` is for organisation-backed dispatch
-- `assigned_contractor_user_id` is for direct contractor dispatch, including independent contractors
-- the two assignment fields are mutually exclusive
-- the `assigned` status is now an explicit lifecycle state, not a synonym for “has an org assignment”
-- contractor visibility covers jobs assigned to their organisation or directly to their user record
+- `POST /login` verifies a scrypt-hashed password and sets a signed `HttpOnly` session cookie.
+- Protected pages redirect back to `/` when the session is missing or invalid.
+- Demo shortcuts (`/switch-user` and the “View as” UI) are available only when `FIXHUB_DEMO_MODE=1`.
+- Demo-seeded databases should be treated as disposable local/demo environments, not promoted into default or production operation.
+
+Seeded demo users when demo mode is enabled:
+- `resident@fixhub.test`
+- `admin@fixhub.test`
+- `reception@fixhub.test`
+- `triage@fixhub.test`
+- `coordinator@fixhub.test`
+- `contractor@fixhub.test`
+- `maintenance.contractor@fixhub.test`
+- `independent.contractor@fixhub.test`
+
+Seeded demo organisations:
+- `University of Newcastle`
+- `Student Living`
+- `Newcastle Plumbing`
+- `Campus Maintenance`
+- `Independent Contractors`
+
+Shared demo password:
+- `fixhub-demo-password`
 
 ## API Examples
 
@@ -193,7 +200,8 @@ POST /api/jobs
 {
   "title": "Leaking bathroom tap",
   "description": "Water is pooling under the sink.",
-  "location": "Block A Room 14",
+  "location_id": "0d7dfe26-8a4f-4dd6-8758-ae8bbdd1839f",
+  "location_detail_text": "Near the bathroom door",
   "asset_name": "Sink"
 }
 ```
@@ -207,15 +215,6 @@ PATCH /api/jobs/{job_id}
 }
 ```
 
-### Schedule A Visit After Triage
-
-```json
-PATCH /api/jobs/{job_id}
-{
-  "status": "scheduled"
-}
-```
-
 ### Contractor Completes Work
 
 ```json
@@ -226,70 +225,27 @@ PATCH /api/jobs/{job_id}
 }
 ```
 
-### Schedule A Follow-Up After Completion
-
-```json
-PATCH /api/jobs/{job_id}
-{
-  "status": "follow_up_scheduled",
-  "reason_code": "resident_reported_recurrence"
-}
-```
-
-### Example Job Response Fields
-
-```json
-{
-  "status": "assigned",
-  "assigned_org_id": null,
-  "assigned_contractor_user_id": "2b53b4e8-6c72-4e89-9a3c-1bc7b9150b53",
-  "assigned_contractor_name": "Indy Independent",
-  "assignee_scope": "user",
-  "assignee_label": "Indy Independent"
-}
-```
-
-### Example Timeline Event Fields
-
-```json
-{
-  "event_type": "assignment",
-  "message": "Assigned Indy Independent",
-  "reason_code": null,
-  "responsibility_stage": "triage",
-  "owner_scope": "user"
-}
-```
-
-## Demo Users
-
-Seeded users:
-- `resident@fixhub.test`
-- `admin@fixhub.test`
-- `reception@fixhub.test`
-- `triage@fixhub.test`
-- `coordinator@fixhub.test`
-- `contractor@fixhub.test`
-- `maintenance.contractor@fixhub.test`
-- `independent.contractor@fixhub.test`
-
-Seeded organisations:
-- `University of Newcastle`
-- `Student Living` (child of `University of Newcastle`)
-- `Newcastle Plumbing` (`external_contractor`)
-- `Campus Maintenance` (`maintenance_team`)
-
 ## Run Modes
+
+### Local SQLite Demo
+
+```powershell
+pip install -e .[dev]
+$env:FIXHUB_DEMO_MODE = "1"
+alembic upgrade head
+uvicorn app.main:app --reload
+```
 
 ### Local App + Docker Postgres
 
 ```powershell
 pip install -e .[dev]
 docker compose up db -d
+$env:DATABASE_URL = "postgresql+psycopg://postgres:postgres@localhost:5432/fixhub"
+$env:FIXHUB_DEMO_MODE = "1"
+alembic upgrade head
 uvicorn app.main:app --reload
 ```
-
-Open: [http://localhost:8000](http://localhost:8000)
 
 ### Full Docker Stack
 
@@ -301,6 +257,8 @@ docker compose up --build
 
 ```powershell
 $env:DATABASE_URL = "postgresql+psycopg://postgres:postgres@localhost:5432/fixhub"
+$env:FIXHUB_DEMO_MODE = "0"
+$env:FIXHUB_SEED_DEMO_DATA = "0"
 alembic upgrade head
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
@@ -317,5 +275,5 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 Current implementation was verified with:
 
 ```powershell
-python -m pytest tests\test_schema.py tests\test_app.py
+.\.venv\Scripts\python.exe -m pytest -q
 ```

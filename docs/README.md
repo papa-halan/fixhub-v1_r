@@ -1,6 +1,6 @@
 # Documentation Index
 
-Last updated: `2026-03-21 15:27:59 +11:00`
+Last updated: `2026-03-21 16:20:58 +11:00`
 
 ## Document Metadata
 
@@ -10,7 +10,7 @@ Last updated: `2026-03-21 15:27:59 +11:00`
 
 ## Purpose
 
-This folder stores implementation-aligned architecture, workflow, migration, and process notes for the current FixHub MVP.
+This folder stores implementation-aligned architecture, workflow, migration, auth, and process notes for the current FixHub MVP.
 
 ## Structure
 
@@ -24,9 +24,9 @@ This folder stores implementation-aligned architecture, workflow, migration, and
 
 ## Current Documentation Focus
 
-- README documents the implemented data model, lifecycle, guard conditions, and API examples
-- the workflow service now owns status-transition rules, accountability guards, and event-side-effect defaults
-- the schema assessment records the refined Student Living workflow now present in code
+- README documents the migrations-first boot flow, signed-session auth, org-scoped locations, lifecycle guards, and API examples
+- the workflow service owns status-transition rules, accountability guards, and event-side-effect defaults
+- the schema assessment records the stabilized Student Living workflow plus the Phase 0.5 organisation/location foundation now present in code
 - the chat context file captures the latest strategic planning, digital-twin positioning, roadmap, and GitHub backlog work
 - architecture notes show how residents, operations roles, and contractors share the same timeline
 - the changelog captures what changed and how it was verified
@@ -38,7 +38,7 @@ This folder stores implementation-aligned architecture, workflow, migration, and
 - Portability of links and file references: pass
 - Runtime verification recorded in docs: pass
 - Docs freshness gate present in test suite: pass
-- Runtime execution available in current automation sandbox: blocked (`python`/`py`/`pip` unavailable; `.venv\\Scripts\\python.exe` denied in this run)
+- Runtime execution available in current environment: pass
 
 ## TODO (Proposed Documentation Improvements)
 

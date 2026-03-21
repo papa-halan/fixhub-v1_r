@@ -1,6 +1,6 @@
 # Schema Assessment: Student Living Workflow
 
-Date: `2026-03-19 16:03:23 +11:00`
+Date: `2026-03-21 16:20:58 +11:00`
 
 ## Document Metadata
 
@@ -16,7 +16,11 @@ Date: `2026-03-19 16:03:23 +11:00`
 - workflow/status-transition rules now live in `app/services/workflow.py`, keeping the API layer focused on transport concerns
 - operations roles now include `reception_admin`, `triage_officer`, and `coordinator`
 - organisations support `parent_org_id` and optional `contractor_mode`
+- users authenticate via password login plus signed session cookies
+- runtime startup now requires the database to be at Alembic head before serving traffic
 - seeded data now models `University of Newcastle -> Student Living` plus both external and maintenance contractor modes
+- locations now support `parent_id` and `type`, and resident report creation uses structured `location_id`
+- jobs now store `organisation_id` directly and keep `location_detail_text` as descriptive context only
 
 ## Workflow Suitability Summary
 
@@ -27,6 +31,8 @@ Date: `2026-03-19 16:03:23 +11:00`
 - direct independent-contractor dispatch
 - role-gated triage and scheduling actions
 - resident-visible timelines with structured accountability metadata
+- organisation-scoped resident reporting with reportable location selection
+- explicit demo-mode auth containment for seeded demo accounts and shortcut switching
 
 ### Guard Conditions
 
@@ -41,17 +47,32 @@ Date: `2026-03-19 16:03:23 +11:00`
 
 ## Verification Evidence
 
-- required runtime verification command: `.\.venv\Scripts\python.exe -m pytest tests\test_schema.py tests\test_app.py`
+- required runtime verification command: `.\.venv\Scripts\python.exe -m pytest -q`
 - current run execution status: verified locally in this environment
-- latest recorded successful result in this run: `23 passed`
-- additional verification in this run: `.\.venv\Scripts\python.exe -m ruff check app tests` passed cleanly
-- runtime coverage in this run now includes lifecycle progression, direct contractor assignment, assignment rollback invariants, role gating, blocked/on-hold/reopen branches, and explicit completion-accountability enforcement
+- latest recorded successful result in this run: `27 passed`
+- runtime coverage in this run includes migration upgrade/downgrade smoke, Alembic target-precedence coverage, startup schema enforcement, auth gating, org boundary checks, location validation, lifecycle progression, direct contractor assignment, assignment rollback invariants, role gating, follow-up rules, and note-only event creation
 
 ## Remaining TODO (Proposed)
 
 - split resident request from execution work order if one resident issue must spawn multiple contractor tracks
 - add a first-class visit/appointment entity instead of representing scheduling only as status plus timeline events
 - decide whether the legacy `admin` umbrella role should remain long term or be fully replaced by capability-style permissions
+
+## Run Log: `2026-03-21 16:20:58 +11:00`
+
+### Delivered In This Run
+
+- stabilized startup around a migrations-first contract: the app now refuses to boot when the schema is not at Alembic head
+- removed test assumptions that relied on header-based auth and verified the current signed-cookie session flow instead
+- verified there is no runtime `create_all()` bootstrap path and added migration smoke coverage, including explicit-config-vs-environment Alembic target protection
+- tightened the current resident reporting flow around structured `location_id` selection and org-scoped location validation
+- verified same-org access controls for resident and operations users, plus direct contractor dispatch visibility rules
+- refreshed README and assessment docs so the documented boot/auth/location model matches the implementation
+
+### Outcome
+
+- the repo is now in a safer pre-Phase-1 state: boot is deterministic, migrations are authoritative, demo auth is explicitly gated, and the current report/job object is backed by real organisation and location references
+- the larger Phase 1 request -> work-order -> visit/dispatch split remains intentionally deferred
 
 ## Run Log: `2026-03-19 16:03:23 +11:00`
 

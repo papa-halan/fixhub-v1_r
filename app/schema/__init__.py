@@ -1,4 +1,5 @@
 from app.schema.asset import AssetOption, AssetRead
+from app.schema.auth import LoginRequest, LoginResponse
 from app.schema.event import EventCreate, EventRead
 from app.schema.job import JobCreate, JobRead, JobUpdate
 from app.schema.location import LocationOption, LocationRead
@@ -13,6 +14,8 @@ __all__ = [
     "JobCreate",
     "JobRead",
     "JobUpdate",
+    "LoginRequest",
+    "LoginResponse",
     "LocationOption",
     "LocationRead",
     "OrganisationOption",

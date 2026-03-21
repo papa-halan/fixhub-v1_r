@@ -6,6 +6,18 @@
 - Reviewer: `schema-test-automation`
 - Status: `active`
 
+## [0.5.0] - 2026-03-21 16:20:58 +11:00
+
+### Changed
+- refreshed `README.md` to document the Phase 0 stabilization outcome: migrations-first boot, signed-cookie session auth, explicit demo mode, and resident report creation via structured `location_id`.
+- refreshed `docs/README.md` to reflect the current verification status and the new org/location/auth foundation.
+- refreshed `docs/schema_student_living_assessment.md` with the stabilized workflow summary, Phase 0.5 schema notes, and latest executable verification result.
+
+### Notes
+- runtime verification succeeded in this environment with `.\.venv\Scripts\python.exe -m pytest -q`.
+- result: `27 passed`.
+- this run intentionally stops before the larger Phase 1 request/work-order/visit split.
+
 ## [0.4.5] - 2026-03-21 15:27:59 +11:00
 
 ### Added

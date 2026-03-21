@@ -3,29 +3,57 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>FixHub Demo Access</title>
+  <title>FixHub Sign In</title>
   <link rel="stylesheet" href="/static/styles.css">
+  <script src="/static/app.js"></script>
 </head>
 <body>
   <main class="page-shell">
     <section class="hero landing-hero">
       <div class="panel">
-        <p class="eyebrow">Demo Access</p>
-        <h1>Choose a demo user to continue.</h1>
+        <p class="eyebrow">Sign In</p>
+        <h1>Enter FixHub</h1>
         <p class="muted">
-          Protected resident, admin, and contractor pages now require an explicit sign-in.
-          Pick one of the seeded demo users below to enter the app.
+          Protected resident, admin, and contractor pages require an authenticated session.
+          {% if demo_mode %}
+          Demo mode is active, so the seeded accounts below are available for local verification.
+          {% endif %}
         </p>
-        {% if invalid_user %}
-        <p class="feedback">Your saved demo session is no longer valid. Choose a user to continue.</p>
+        {% if auth_error %}
+        <p class="feedback">{{ auth_error }}</p>
         {% endif %}
       </div>
 
       <section class="panel">
         <div class="panel-header">
           <div>
-            <p class="eyebrow">Available Users</p>
-            <h2>Sign in as</h2>
+            <p class="eyebrow">Session Login</p>
+            <h2>Sign in</h2>
+          </div>
+        </div>
+        <form id="login-form" class="form-grid" method="post">
+          <input type="hidden" name="next_path" value="{{ next_path }}">
+          <label>
+            Email
+            <input type="email" name="email" placeholder="resident@fixhub.test" required>
+          </label>
+          <label>
+            Password
+            <input type="password" name="password" placeholder="Enter your password" required>
+          </label>
+          <div class="actions">
+            <button class="button" type="submit">Sign in</button>
+          </div>
+          <p class="feedback" data-feedback></p>
+        </form>
+      </section>
+
+      {% if demo_mode and demo_users %}
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <p class="eyebrow">Demo Shortcuts</p>
+            <h2>Switch directly</h2>
           </div>
         </div>
 
@@ -37,9 +65,21 @@
           {% endfor %}
         </div>
 
-        <p class="form-helper muted">API requests still require the <code>X-User-Email</code> header.</p>
+        <p class="form-helper muted">Shared demo password: <code>{{ demo_password }}</code></p>
       </section>
+      {% endif %}
     </section>
   </main>
+
+  <script>
+    FixHub.wireJsonForm(document.getElementById("login-form"), async (formData) => {
+      const result = await FixHub.sendJson("/login", "POST", {
+        email: formData.get("email"),
+        password: formData.get("password"),
+        next_path: formData.get("next_path"),
+      });
+      window.location.href = result.redirect_path;
+    });
+  </script>
 </body>
 </html>

@@ -116,7 +116,6 @@ ALLOWED_STATUS_CHANGES = {
     },
     JobStatus.follow_up_scheduled: {
         JobStatus.in_progress,
-        JobStatus.completed,
         JobStatus.reopened,
         JobStatus.cancelled,
         JobStatus.escalated,

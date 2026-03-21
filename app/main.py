@@ -1,59 +1,103 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from dataclasses import replace
+from urllib.parse import quote
 
-from fastapi import FastAPI, Request, status
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, HTTPException, Request, status
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api import admin_router, common_router, contractor_router, jobs_router, resident_router
 from app.api.deps import APP_DIR, user_query
-from app.core.config import settings
-from app.core.database import build_engine, build_session_factory
-from app.models import Base, User
+from app.core.config import Settings, load_settings
+from app.core.database import build_engine, build_session_factory, require_schema_ready
+from app.core.security import verify_session_token
+from app.models import User
 from app.services import ensure_demo_data
 
 
-def create_app(database_url: str | None = None) -> FastAPI:
-    engine = build_engine(database_url)
+def create_app(
+    database_url: str | None = None,
+    *,
+    settings_override: Settings | None = None,
+    demo_mode: bool | None = None,
+    allow_header_auth: bool | None = None,
+) -> FastAPI:
+    app_settings = settings_override or load_settings(
+        database_url=database_url,
+        demo_mode=demo_mode,
+        allow_header_auth=allow_header_auth,
+    )
+    if database_url is not None and app_settings.database_url != database_url:
+        app_settings = replace(app_settings, database_url=database_url)
+    if demo_mode is not None and app_settings.demo_mode != demo_mode:
+        app_settings = replace(
+            app_settings,
+            demo_mode=demo_mode,
+            seed_demo_data=app_settings.seed_demo_data if demo_mode else False,
+        )
+    if allow_header_auth is not None and app_settings.allow_header_auth != allow_header_auth:
+        app_settings = replace(app_settings, allow_header_auth=allow_header_auth)
+
+    engine = build_engine(app_settings.database_url)
     session_factory = build_session_factory(engine)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
-        Base.metadata.create_all(bind=engine)
-        with session_factory() as session:
-            ensure_demo_data(session)
-            session.commit()
+        require_schema_ready(engine)
+        if app_settings.seed_demo_data:
+            with session_factory() as session:
+                ensure_demo_data(session, demo_password=app_settings.demo_password)
+                session.commit()
         yield
 
-    app = FastAPI(title=settings.app_name, lifespan=lifespan)
+    app = FastAPI(title=app_settings.app_name, lifespan=lifespan)
     app.state.engine = engine
     app.state.SessionLocal = session_factory
+    app.state.settings = app_settings
     app.mount("/static", StaticFiles(directory=str(APP_DIR / "static")), name="static")
 
     @app.middleware("http")
-    async def resolve_api_user(request: Request, call_next):
-        if not request.url.path.startswith("/api"):
-            return await call_next(request)
+    async def resolve_request_user(request: Request, call_next):
+        request.state.current_user = None
+        request.state.invalid_session = False
 
-        user_email = (request.headers.get("X-User-Email") or "").strip()
-        if not user_email:
+        session_token = (request.cookies.get(app_settings.session_cookie_name) or "").strip()
+        if session_token:
+            user_id = verify_session_token(session_token, secret=app_settings.session_secret)
+            if user_id is None:
+                request.state.invalid_session = True
+            else:
+                with session_factory() as auth_session:
+                    user = auth_session.scalar(user_query().where(User.id == user_id).limit(1))
+                if user is None:
+                    request.state.invalid_session = True
+                else:
+                    request.state.current_user = user
+
+        if request.state.current_user is None and request.url.path.startswith("/api") and app_settings.allow_header_auth:
+            header_email = (request.headers.get("X-User-Email") or "").strip()
+            if header_email:
+                with session_factory() as auth_session:
+                    user = auth_session.scalar(user_query().where(User.email == header_email).limit(1))
+                if user is not None:
+                    request.state.current_user = user
+
+        if request.url.path.startswith("/api") and request.state.current_user is None:
             return JSONResponse(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                content={"detail": "X-User-Email header required"},
+                content={"detail": "Authentication required"},
             )
 
-        with session_factory() as auth_session:
-            user = auth_session.scalar(user_query().where(User.email == user_email).limit(1))
-
-        if user is None:
-            return JSONResponse(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                content={"detail": "Unknown user"},
-            )
-
-        request.state.api_user_email = user_email
         return await call_next(request)
+
+    @app.exception_handler(HTTPException)
+    async def handle_http_exception(request: Request, exc: HTTPException):
+        if exc.status_code == status.HTTP_401_UNAUTHORIZED and not request.url.path.startswith("/api"):
+            next_path = request.url.path if request.url.path.startswith("/") else "/"
+            return RedirectResponse(f"/?next={quote(next_path)}", status_code=status.HTTP_303_SEE_OTHER)
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail}, headers=exc.headers)
 
     app.include_router(common_router)
     app.include_router(jobs_router)

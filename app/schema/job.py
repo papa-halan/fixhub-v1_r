@@ -12,12 +12,20 @@ from app.schema.base import SchemaModel, strip_non_blank
 class JobCreate(SchemaModel):
     title: str
     description: str
-    location: str
+    location_id: uuid.UUID
+    location_detail_text: str | None = None
     asset_name: str | None = None
 
-    @field_validator("title", "description", "location")
+    @field_validator("title", "description")
     @classmethod
     def validate_text(cls, value: str, info: ValidationInfo) -> str:
+        return strip_non_blank(value, info.field_name)
+
+    @field_validator("location_detail_text")
+    @classmethod
+    def validate_location_detail_text(cls, value: str | None, info: ValidationInfo) -> str | None:
+        if value is None:
+            return None
         return strip_non_blank(value, info.field_name)
 
     @field_validator("asset_name")
@@ -48,8 +56,10 @@ class JobRead(SchemaModel):
     id: uuid.UUID
     title: str
     description: str
+    organisation_id: uuid.UUID
     location: str
     location_id: uuid.UUID
+    location_detail_text: str | None = None
     asset_id: uuid.UUID | None = None
     asset_name: str | None = None
     status: JobStatus

@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="/static/styles.css">
   <script src="/static/app.js"></script>
 </head>
-<body data-user-email="{{ current_user.email }}">
+<body>
   <header class="shell-header">
     <div>
       <a class="brand" href="{{ home_path }}">FixHub</a>
@@ -19,6 +19,9 @@
       {% if current_user.organisation_name %}
       <span>{{ current_user.organisation_name }}</span>
       {% endif %}
+      <form action="/logout" method="post">
+        <button class="nav-link" type="submit">Sign out</button>
+      </form>
     </div>
   </header>
 
@@ -28,6 +31,7 @@
     {% endfor %}
   </nav>
 
+  {% if demo_mode and demo_users %}
   <section class="switcher">
     <span class="switcher-label">View as</span>
     <div class="switcher-links">
@@ -38,6 +42,7 @@
       {% endfor %}
     </div>
   </section>
+  {% endif %}
 
   <main class="page-shell">
     {% block content %}{% endblock %}

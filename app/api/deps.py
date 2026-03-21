@@ -10,6 +10,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, joinedload
 
+from app.core.security import verify_session_token
 from app.models import (
     Event,
     Job,
@@ -67,6 +68,7 @@ def job_query():
         select(Job)
         .options(
             joinedload(Job.creator).joinedload(User.organisation),
+            joinedload(Job.organisation),
             joinedload(Job.location),
             joinedload(Job.asset),
             joinedload(Job.assigned_org),
@@ -81,6 +83,7 @@ def event_query(job_id: uuid.UUID):
         select(Event)
         .where(Event.job_id == job_id)
         .options(
+            joinedload(Event.job).joinedload(Job.organisation),
             joinedload(Event.job).joinedload(Job.location),
             joinedload(Event.job).joinedload(Job.asset),
             joinedload(Event.job).joinedload(Job.assigned_org),
@@ -94,45 +97,34 @@ def event_query(job_id: uuid.UUID):
     )
 
 
-def current_selector(request: Request) -> str | None:
-    if request.url.path.startswith("/api"):
-        return getattr(request.state, "api_user_email", None)
-
-    query_user = (request.query_params.get("as_user") or "").strip()
-    if query_user:
-        return query_user
-
-    header_user = (request.headers.get("X-User-Email") or "").strip()
-    if header_user:
-        return header_user
-
-    cookie_user = (request.cookies.get("fixhub_user") or "").strip()
-    if cookie_user:
-        return cookie_user
-
-    return None
-
-
 def lookup_current_user(
     request: Request,
     session: Session,
-) -> tuple[str | None, User | None]:
-    selector = current_selector(request)
-    if selector is None:
-        return None, None
-    user = session.scalar(user_query().where(User.email == selector).limit(1))
-    return selector, user
+) -> tuple[bool, User | None]:
+    settings = request.app.state.settings
+    token = (request.cookies.get(settings.session_cookie_name) or "").strip()
+    if not token:
+        return False, None
+
+    user_id = verify_session_token(token, secret=settings.session_secret)
+    if user_id is None:
+        return True, None
+
+    user = session.scalar(user_query().where(User.id == user_id).limit(1))
+    if user is None:
+        return True, None
+    if user.is_demo_account and not settings.demo_mode:
+        return True, None
+    return False, user
 
 
 def get_current_user(
     request: Request,
     session: Session = Depends(get_session),
 ) -> User:
-    selector, user = lookup_current_user(request, session)
-    if selector is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+    _invalid_cookie, user = lookup_current_user(request, session)
     if user is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unknown user")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
     return user
 
 
@@ -210,7 +202,6 @@ def serialize_user(user: User) -> dict[str, object]:
 
 
 def job_location_name(job: Job) -> str:
-    assert job.location_id is not None
     assert job.location is not None
     return job.location.name
 
@@ -222,14 +213,15 @@ def job_asset_name(job: Job) -> str | None:
 
 
 def serialize_job(job: Job) -> dict[str, object]:
-    assert job.location_id is not None
     scope = assignee_scope(job)
     return {
         "id": job.id,
         "title": job.title,
         "description": job.description,
+        "organisation_id": job.organisation_id,
         "location": job_location_name(job),
         "location_id": job.location_id,
+        "location_detail_text": job.location_detail_text,
         "asset_id": job.asset_id,
         "asset_name": job_asset_name(job),
         "status": job.status.value,
@@ -289,7 +281,7 @@ def serialize_event(event: Event) -> dict[str, object]:
     }
 
 
-def serialize_switch_user(user: User) -> dict[str, str]:
+def serialize_demo_user(user: User) -> dict[str, str]:
     return {
         "email": user.email,
         "label": user.name,
@@ -307,16 +299,10 @@ def build_job_counts(jobs: list[dict[str, object]]) -> dict[str, int]:
 
 
 def can_view_job(job: Job, user: User) -> bool:
-    if job.location_id is None or job.location is None:
-        return False
     if user.role in OPERATIONS_ROLES:
-        return bool(user.organisation_id and job.location.organisation_id == user.organisation_id)
+        return bool(user.organisation_id and job.organisation_id == user.organisation_id)
     if user.role == UserRole.resident:
-        return bool(
-            user.organisation_id
-            and job.created_by == user.id
-            and job.location.organisation_id == user.organisation_id
-        )
+        return bool(user.organisation_id and job.created_by == user.id and job.organisation_id == user.organisation_id)
     if user.role != UserRole.contractor:
         return False
     if job.assigned_contractor_user_id == user.id:
@@ -344,19 +330,16 @@ def visible_jobs(
     mine: bool = False,
     assigned: bool = False,
 ) -> list[Job]:
-    stmt = job_query().where(Job.location_id.is_not(None))
+    stmt = job_query()
 
     if user.role in OPERATIONS_ROLES:
         if user.organisation_id is None:
             return []
-        stmt = stmt.where(Job.location.has(organisation_id=user.organisation_id))
+        stmt = stmt.where(Job.organisation_id == user.organisation_id)
     elif mine or user.role == UserRole.resident:
         if user.organisation_id is None:
             return []
-        stmt = stmt.where(
-            Job.created_by == user.id,
-            Job.location.has(organisation_id=user.organisation_id),
-        )
+        stmt = stmt.where(Job.created_by == user.id, Job.organisation_id == user.organisation_id)
     else:
         contractor_filters = [Job.assigned_contractor_user_id == user.id]
         if user.organisation_id is not None:
@@ -364,9 +347,7 @@ def visible_jobs(
         stmt = stmt.where(or_(*contractor_filters))
 
     if assigned:
-        stmt = stmt.where(
-            or_(Job.assigned_org_id.is_not(None), Job.assigned_contractor_user_id.is_not(None))
-        )
+        stmt = stmt.where(or_(Job.assigned_org_id.is_not(None), Job.assigned_contractor_user_id.is_not(None)))
 
     return list(session.scalars(stmt))
 
@@ -379,12 +360,14 @@ def render_page(
     template_name: str,
     **context: object,
 ) -> HTMLResponse:
+    demo_mode = request.app.state.settings.demo_mode
     base_context = {
         "request": request,
         "current_user": serialize_user(current_user),
         "home_path": home_path_for(current_user.role),
         "nav_links": navigation_for(current_user),
-        "demo_users": [serialize_switch_user(user) for user in list_demo_users(session)],
+        "demo_mode": demo_mode,
+        "demo_users": [serialize_demo_user(user) for user in list_demo_users(session)] if demo_mode else [],
     }
     base_context.update(context)
     return templates.TemplateResponse(request=request, name=template_name, context=base_context)
@@ -394,15 +377,20 @@ def render_login_page(
     *,
     request: Request,
     session: Session,
-    invalid_user: bool = False,
+    auth_error: str | None = None,
+    next_path: str = "/",
 ) -> HTMLResponse:
+    demo_mode = request.app.state.settings.demo_mode
     return templates.TemplateResponse(
         request=request,
         name="login.html",
         context={
             "request": request,
-            "demo_users": [serialize_switch_user(user) for user in list_demo_users(session)],
-            "invalid_user": invalid_user,
+            "auth_error": auth_error,
+            "next_path": next_path,
+            "demo_mode": demo_mode,
+            "demo_password": request.app.state.settings.demo_password if demo_mode else None,
+            "demo_users": [serialize_demo_user(user) for user in list_demo_users(session)] if demo_mode else [],
         },
     )
 

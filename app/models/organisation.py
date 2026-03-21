@@ -59,6 +59,10 @@ class Organisation(Base):
         back_populates="organisation",
         order_by="Location.name",
     )
+    jobs: Mapped[list[Job]] = relationship(
+        back_populates="organisation",
+        foreign_keys="Job.organisation_id",
+    )
     assigned_jobs: Mapped[list[Job]] = relationship(
         back_populates="assigned_org",
         foreign_keys="Job.assigned_org_id",

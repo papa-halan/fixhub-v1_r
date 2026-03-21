@@ -4,10 +4,11 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import ForeignKey, Index, Text, UniqueConstraint
+from sqlalchemy import Enum, ForeignKey, Index, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, created_timestamp, uuid_pk
+from app.models.enums import LocationType
 
 if TYPE_CHECKING:
     from app.models.asset import Asset
@@ -29,10 +30,30 @@ class Location(Base):
         nullable=False,
         index=True,
     )
+    parent_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("locations.id"),
+        nullable=True,
+        index=True,
+    )
     name: Mapped[str] = mapped_column(Text, nullable=False)
+    type: Mapped[LocationType] = mapped_column(
+        Enum(LocationType, name="location_type_enum", native_enum=False, validate_strings=True),
+        nullable=False,
+        default=LocationType.space,
+        server_default=LocationType.space.value,
+    )
     created_at: Mapped[datetime] = created_timestamp()
 
     organisation: Mapped[Organisation] = relationship(back_populates="locations")
+    parent: Mapped[Location | None] = relationship(
+        remote_side="Location.id",
+        back_populates="children",
+        foreign_keys=[parent_id],
+    )
+    children: Mapped[list[Location]] = relationship(
+        back_populates="parent",
+        order_by="Location.name",
+    )
     assets: Mapped[list[Asset]] = relationship(
         back_populates="location_record",
         cascade="all, delete-orphan",

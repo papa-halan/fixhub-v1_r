@@ -36,8 +36,16 @@ class Event(Base):
         ForeignKey("organisations.id"),
         nullable=True,
     )
-    location_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("locations.id"), nullable=True)
-    asset_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("assets.id"), nullable=True)
+    location_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("locations.id"),
+        nullable=True,
+        index=True,
+    )
+    asset_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("assets.id"),
+        nullable=True,
+        index=True,
+    )
     event_type: Mapped[EventType] = mapped_column(
         Enum(
             EventType,

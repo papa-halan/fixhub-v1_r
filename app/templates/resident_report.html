@@ -5,7 +5,7 @@
   <div>
     <p class="eyebrow">Resident</p>
     <h1>Report an issue</h1>
-    <p>Keep the report short and concrete. FixHub will remember the location and asset so future issues can be logged faster.</p>
+    <p>Keep the report short and concrete. Pick the managed location first, then add any extra detail that helps the team find the issue faster.</p>
   </div>
   <div class="panel">
     <h2>What happens next</h2>
@@ -16,7 +16,7 @@
 <section class="panel">
   <div class="panel-header">
     <h2>Create Job</h2>
-    <p>Every new job starts with a single event: Report created. Previous locations and assets are suggested automatically.</p>
+    <p>Every new job starts with a single event: Report created. Locations are now selected from the managed catalog for your organisation.</p>
   </div>
   <form id="report-form" class="form-grid" method="post">
     <label>
@@ -25,25 +25,33 @@
     </label>
     <label>
       Location
-      <input type="text" name="location" list="location-options" placeholder="Block A, Room 14" required>
-      <datalist id="location-options">
+      <select name="location_id" {% if not location_catalog %}disabled{% endif %} required>
+        <option value="">Choose a location</option>
         {% for location in location_catalog %}
-        <option value="{{ location.name }}"></option>
+        <option value="{{ location.id }}">{{ location.name }}</option>
         {% endfor %}
-      </datalist>
+      </select>
     </label>
     <label>
       Asset
-      <input type="text" name="asset_name" list="asset-options" placeholder="Sink" required>
+      <input type="text" name="asset_name" list="asset-options" placeholder="Sink" required {% if not location_catalog %}disabled{% endif %}>
       <datalist id="asset-options"></datalist>
+    </label>
+    <label>
+      Location Detail
+      <input type="text" name="location_detail_text" placeholder="Optional room note, access note, or nearby landmark">
     </label>
     <label>
       Description
       <textarea name="description" placeholder="Water is dripping steadily under the sink." required></textarea>
     </label>
+    {% if location_catalog %}
     <p class="muted form-helper">Examples: sink, tap, wardrobe hinge, shower door, ceiling light.</p>
+    {% else %}
+    <p class="feedback">No reportable locations are configured for your organisation yet.</p>
+    {% endif %}
     <div class="actions">
-      <button class="button" type="submit">Submit issue</button>
+      <button class="button" type="submit" {% if not location_catalog %}disabled{% endif %}>Submit issue</button>
     </div>
     <p class="feedback" data-feedback></p>
   </form>
@@ -53,22 +61,25 @@
   const rememberedLocationCatalog = {{ location_catalog | tojson }};
   const assetOptionsByLocation = Object.fromEntries(
     rememberedLocationCatalog.map((location) => [
-      location.name,
+      location.id,
       location.assets.map((asset) => asset.name),
     ])
   );
-  const locationInput = document.querySelector('[name="location"]');
+  const locationInput = document.querySelector('[name="location_id"]');
   const assetInput = document.querySelector('[name="asset_name"]');
   const assetOptions = document.getElementById("asset-options");
 
   const renderAssetOptions = () => {
-    const assets = assetOptionsByLocation[locationInput.value.trim()] || [];
+    const assets = assetOptionsByLocation[locationInput.value] || [];
     assetOptions.innerHTML = "";
     assets.forEach((assetName) => {
       const option = document.createElement("option");
       option.value = assetName;
       assetOptions.appendChild(option);
     });
+    if (assetInput.value && !assets.includes(assetInput.value)) {
+      assetInput.value = "";
+    }
   };
 
   locationInput.addEventListener("input", renderAssetOptions);
@@ -77,7 +88,8 @@
   FixHub.wireJsonForm(document.getElementById("report-form"), async (formData) => {
     const job = await FixHub.sendJson("/api/jobs", "POST", {
       title: formData.get("title"),
-      location: formData.get("location"),
+      location_id: formData.get("location_id"),
+      location_detail_text: formData.get("location_detail_text") || null,
       asset_name: formData.get("asset_name"),
       description: formData.get("description"),
     });

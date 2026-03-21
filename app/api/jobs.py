@@ -20,6 +20,7 @@ from app.models import (
     EventType,
     Job,
     JobStatus,
+    Location,
     Organisation,
     OrganisationType,
     ResponsibilityStage,
@@ -27,6 +28,7 @@ from app.models import (
     UserRole,
 )
 from app.schema import EventCreate, EventRead, JobCreate, JobRead, JobUpdate, UserRead
+from app.services.catalog import is_reportable_location
 from app.services import (
     ASSIGNEE_REQUIRED_STATUSES,
     ASSIGNMENT_ROLES,
@@ -38,7 +40,6 @@ from app.services import (
     assignee_scope,
     fallback_status_for_unassigned,
     find_or_create_asset,
-    find_or_create_location,
     job_has_assignee,
 )
 
@@ -59,16 +60,23 @@ def create_job(
 ):
     if current_user.role != UserRole.resident:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only residents can create jobs")
-    location_name = clean_text(payload.location, "location")
-    if current_user.organisation is None:
+    if current_user.organisation_id is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User must belong to an organisation")
-    location = find_or_create_location(session, organisation=current_user.organisation, name=location_name)
+    location = session.get(Location, payload.location_id)
+    if (
+        location is None
+        or location.organisation_id != current_user.organisation_id
+        or not is_reportable_location(location)
+    ):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Choose a valid location")
     asset_name = clean_text(payload.asset_name or payload.title, "asset_name")
     asset = find_or_create_asset(session, location=location, name=asset_name)
     job = Job(
         title=clean_text(payload.title, "title"),
         description=clean_text(payload.description, "description"),
-        location_snapshot=location_name,
+        organisation_id=current_user.organisation_id,
+        location_snapshot=location.name,
+        location_detail_text=payload.location_detail_text,
         location_id=location.id,
         asset_id=asset.id,
         status=JobStatus.new,
@@ -156,7 +164,7 @@ def build_assignment_events(
         events.append(
             EventSpec(
                 message=STATUS_EVENT_MESSAGES[JobStatus.assigned],
-                event_type=EventType.assignment,
+                event_type=EventType.status_change,
                 responsibility_stage=ResponsibilityStage.triage,
                 owner_scope=current_scope,
             )
@@ -337,15 +345,14 @@ def add_event(
     current_user: User = Depends(get_current_user),
 ):
     job = visible_job(session, current_user, job_id)
+    if current_user.role == UserRole.resident:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Residents cannot add timeline events")
     event = append_event(
         session,
         job=job,
         actor=current_user,
         message=clean_text(payload.message, "message"),
-        event_type=payload.event_type or EventType.note,
-        reason_code=payload.reason_code,
-        responsibility_stage=payload.responsibility_stage,
-        owner_scope=payload.owner_scope,
+        event_type=EventType.note,
     )
     session.commit()
     return serialize_event(event)

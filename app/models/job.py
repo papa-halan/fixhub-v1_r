@@ -35,6 +35,7 @@ class Job(Base):
     title: Mapped[str] = mapped_column(Text, nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)
     location_snapshot: Mapped[str] = mapped_column(Text, nullable=False)
+    location_detail_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[JobStatus] = mapped_column(
         Enum(JobStatus, name="job_status_enum", native_enum=False, validate_strings=True),
         nullable=False,
@@ -42,6 +43,11 @@ class Job(Base):
         server_default=JobStatus.new.value,
     )
     created_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    organisation_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("organisations.id"),
+        nullable=False,
+        index=True,
+    )
     location_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("locations.id"),
         nullable=False,
@@ -79,6 +85,10 @@ class Job(Base):
     location: Mapped[Location] = relationship(
         back_populates="jobs",
         foreign_keys=[location_id],
+    )
+    organisation: Mapped[Organisation] = relationship(
+        back_populates="jobs",
+        foreign_keys=[organisation_id],
     )
     asset: Mapped[Asset | None] = relationship(
         back_populates="jobs",

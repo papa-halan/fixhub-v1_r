@@ -3,21 +3,11 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from app.models import Asset, Location, Organisation, User
+from app.models import Asset, Location, LocationType, User
 from app.schema import AssetOption, LocationOption
 
 
-def find_or_create_location(session: Session, *, organisation: Organisation, name: str) -> Location:
-    location = session.scalar(
-        select(Location)
-        .where(Location.organisation_id == organisation.id, Location.name == name)
-        .limit(1)
-    )
-    if location is None:
-        location = Location(organisation_id=organisation.id, name=name)
-        session.add(location)
-        session.flush()
-    return location
+REPORTABLE_LOCATION_TYPES = (LocationType.space, LocationType.unit)
 
 
 def find_or_create_asset(session: Session, *, location: Location, name: str) -> Asset:
@@ -40,7 +30,10 @@ def build_location_asset_catalog(session: Session, *, user: User) -> list[dict[s
     locations = list(
         session.scalars(
             select(Location)
-            .where(Location.organisation_id == user.organisation_id)
+            .where(
+                Location.organisation_id == user.organisation_id,
+                Location.type.in_(REPORTABLE_LOCATION_TYPES),
+            )
             .options(selectinload(Location.assets))
             .order_by(Location.name.asc())
         )
@@ -49,7 +42,9 @@ def build_location_asset_catalog(session: Session, *, user: User) -> list[dict[s
     return [
         LocationOption(
             id=location.id,
+            parent_id=location.parent_id,
             name=location.name,
+            type=location.type,
             assets=[
                 AssetOption(id=asset.id, name=asset.name)
                 for asset in location.assets
@@ -57,3 +52,7 @@ def build_location_asset_catalog(session: Session, *, user: User) -> list[dict[s
         ).model_dump(mode="json")
         for location in locations
     ]
+
+
+def is_reportable_location(location: Location) -> bool:
+    return location.type in REPORTABLE_LOCATION_TYPES

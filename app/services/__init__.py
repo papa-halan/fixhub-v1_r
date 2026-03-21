@@ -1,5 +1,7 @@
-from app.services.catalog import build_location_asset_catalog, find_or_create_asset, find_or_create_location
-from app.services.demo import ensure_demo_data, list_demo_users
+from app.services.auth import AuthenticationError, authenticate_user
+from app.services.catalog import build_location_asset_catalog, find_or_create_asset
+from app.services.demo import ensure_demo_data, is_demo_user_email, list_demo_users
+from app.services.passwords import hash_password, verify_password
 from app.services.workflow import (
     ASSIGNEE_REQUIRED_STATUSES,
     ASSIGNMENT_ROLES,
@@ -30,6 +32,7 @@ from app.services.workflow import (
 
 __all__ = [
     "ALLOWED_STATUS_CHANGES",
+    "AuthenticationError",
     "ASSIGNEE_REQUIRED_STATUSES",
     "ASSIGNMENT_ROLES",
     "COORDINATION_ROLES",
@@ -41,6 +44,7 @@ __all__ = [
     "ROLE_GROUPS_BY_TARGET",
     "STATUS_EVENT_MESSAGES",
     "TRIAGE_ROLES",
+    "authenticate_user",
     "append_event",
     "apply_status_change",
     "assignee_label",
@@ -52,11 +56,13 @@ __all__ = [
     "ensure_demo_data",
     "fallback_status_for_unassigned",
     "find_or_create_asset",
-    "find_or_create_location",
+    "hash_password",
+    "is_demo_user_email",
     "job_has_assignee",
     "list_demo_users",
     "require_status_permission",
     "role_label",
     "touch_job",
     "validate_assignee_required",
+    "verify_password",
 ]
