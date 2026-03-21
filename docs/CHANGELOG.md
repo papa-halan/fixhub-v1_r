@@ -6,6 +6,29 @@
 - Reviewer: `schema-test-automation`
 - Status: `active`
 
+## [0.4.5] - 2026-03-21 15:27:59 +11:00
+
+### Added
+- `docs/chat_context_2026-03-21.md` with a full new-chat handoff covering repo exploration, specialist review findings, AMS/CMS/CMMS and digital-twin positioning, the finalized phased implementation plan, the quarter-by-quarter roadmap, and the GitHub issue backlog produced in the planning chat.
+
+### Changed
+- updated `docs/README.md` to index the new chat-context handoff file and reflect the latest documentation timestamp.
+
+### Notes
+- this run is documentation-only; no application code was changed.
+- the new handoff doc is intended to let a fresh chat continue with implementation planning or execution without replaying the entire prior conversation.
+
+## [0.4.4] - 2026-03-19 16:03:23 +11:00
+
+### Changed
+- reviewed commit evidence since automation last run (`2026-03-19T04:09:45.240Z`): `0668f89ad113dba36ecf399066f08d8c5defc14f` and `b98e309fd74a5edf074606b33d4961799decefb7`.
+- validated that post-run changes include workflow-service extraction, accountability guard updates, and expanded lifecycle/edge-case tests by inspecting diffs and current repository state.
+- refreshed `docs/README.md`, `docs/schema_student_living_assessment.md`, and `docs/todo_implementation_checklist.md` with this run's timestamped evidence and status.
+
+### Notes
+- required runtime commands were attempted but blocked in this sandbox (`python`/`py`/`pip` unavailable; `.venv\\Scripts\\python.exe` execution denied), so this run is grounded on git/test-code evidence only.
+- no additional code fix was applied because commit diffs did not present a new concrete regression requiring a minimal patch.
+
 ## [0.4.3] - 2026-03-19 15:24:12 +11:00
 
 ### Changed

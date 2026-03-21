@@ -1,6 +1,6 @@
 # TODO Implementation Checklist
 
-Last updated: `2026-03-19 15:24:12 +11:00`
+Last updated: `2026-03-19 16:03:23 +11:00`
 
 ## Document Metadata
 
@@ -127,6 +127,11 @@ Run note (`2026-03-19 15:24:12 +11:00`):
 - extracted lifecycle rules into `app/services/workflow.py` and expanded guarded-path coverage for blocked, on-hold, reopened, and explicit completion-accountability transitions.
 - runtime verification succeeded locally with `.\.venv\Scripts\python.exe -m pytest tests\test_schema.py tests\test_app.py` (`23 passed`) and `.\.venv\Scripts\python.exe -m ruff check app tests`.
 - this dirty worktree still contains older documentation entries timestamped later than the current environment clock; the timestamp above reflects the actual verification time for this pass.
+
+Run note (`2026-03-19 16:03:23 +11:00`):
+- reviewed new commits since automation last run: `0668f89ad113dba36ecf399066f08d8c5defc14f` and `b98e309fd74a5edf074606b33d4961799decefb7`.
+- attempted required runtime commands plus fallback steps, but this sandbox still blocks execution (`python`/`py`/`pip` missing and `.venv\\Scripts\\python.exe` access denied).
+- no further code patch was applied because commit/test evidence did not show a new concrete regression beyond already-landed changes.
 
 ## Definition of Done
 

@@ -1,6 +1,6 @@
 # Schema Assessment: Student Living Workflow
 
-Date: `2026-03-19 15:24:12 +11:00`
+Date: `2026-03-19 16:03:23 +11:00`
 
 ## Document Metadata
 
@@ -52,6 +52,22 @@ Date: `2026-03-19 15:24:12 +11:00`
 - split resident request from execution work order if one resident issue must spawn multiple contractor tracks
 - add a first-class visit/appointment entity instead of representing scheduling only as status plus timeline events
 - decide whether the legacy `admin` umbrella role should remain long term or be fully replaced by capability-style permissions
+
+## Run Log: `2026-03-19 16:03:23 +11:00`
+
+### Delivered In This Run
+
+- scanned commit evidence since automation last run (`2026-03-19T04:09:45.240Z`) and in the last 24 hours.
+- reviewed concrete commit diffs:
+  - `0668f89ad113dba36ecf399066f08d8c5defc14f`
+  - `b98e309fd74a5edf074606b33d4961799decefb7`
+- verified resident-reported workflow coverage and edge-case intent by inspecting current tests (`tests/test_app.py`, `tests/test_schema.py`) and workflow guards in `app/services/workflow.py`.
+- attempted required runtime flow (`python -m pip install -e .[dev]`, `python -m pytest`, fallback checks), but interpreter tooling is unavailable in this sandbox.
+
+### Outcome
+
+- no additional minimal code fix was applied because current commit evidence did not show a new concrete regression requiring patching.
+- proposed product tracks still pending are request/work-order split (`A2`) and structured visits/routing records (`A4`).
 
 ## Run Log: `2026-03-19 15:24:12 +11:00`
 
