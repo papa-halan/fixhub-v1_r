@@ -1,6 +1,6 @@
 # Schema Assessment: Student Living Workflow
 
-Date: `2026-03-21 16:20:58 +11:00`
+Date: `2026-03-21 18:31:16 +11:00`
 
 ## Document Metadata
 
@@ -10,29 +10,39 @@ Date: `2026-03-21 16:20:58 +11:00`
 
 ## Implemented Baseline
 
-- `JobStatus` now covers `new`, `assigned`, `triaged`, `scheduled`, `in_progress`, `on_hold`, `blocked`, `completed`, `cancelled`, `reopened`, `follow_up_scheduled`, and `escalated`
+- `JobStatus` covers `new`, `assigned`, `triaged`, `scheduled`, `in_progress`, `on_hold`, `blocked`, `completed`, `cancelled`, `reopened`, `follow_up_scheduled`, and `escalated`
 - assignment is decoupled from status via mutually exclusive `assigned_org_id` and `assigned_contractor_user_id`
-- event records now store `event_type`, `reason_code`, `responsibility_stage`, and `owner_scope`
-- workflow/status-transition rules now live in `app/services/workflow.py`, keeping the API layer focused on transport concerns
-- operations roles now include `reception_admin`, `triage_officer`, and `coordinator`
-- organisations support `parent_org_id` and optional `contractor_mode`
+- event records store `event_type`, `reason_code`, `responsibility_stage`, and `owner_scope`
+- workflow/status-transition rules live in `app/services/workflow.py`
+- operations roles are split across `reception_admin`, `triage_officer`, and `coordinator`
 - users authenticate via password login plus signed session cookies
-- runtime startup now requires the database to be at Alembic head before serving traffic
-- seeded data now models `University of Newcastle -> Student Living` plus both external and maintenance contractor modes
-- locations now support `parent_id` and `type`, and resident report creation uses structured `location_id`
-- jobs now store `organisation_id` directly and keep `location_detail_text` as descriptive context only
+- demo shortcuts are rendered only when `demo_mode` is enabled
+- normal mode supports an optional bootstrap non-demo user through startup environment variables
+- runtime startup requires the database to be at Alembic head before serving traffic
+- locations support `parent_id` and `type`, and resident report creation uses structured `location_id`
+- jobs store `organisation_id` directly and keep `location_detail_text` as descriptive context only
+- root-level legacy placeholder locations are removed or demoted out of the active catalog during migration cleanup
 
 ## Workflow Suitability Summary
 
-### What is now supported
+### What is supported now
 
-- explicit triage and scheduling checkpoints before execution
-- blocked/on-hold/escalation/reopen/follow-up paths
+- explicit intake, triage, scheduling, and execution checkpoints before completion
+- blocked, on-hold, escalation, reopen, and follow-up paths
 - direct independent-contractor dispatch
 - role-gated triage and scheduling actions
 - resident-visible timelines with structured accountability metadata
-- organisation-scoped resident reporting with reportable location selection
+- organisation-scoped resident reporting with managed location selection
 - explicit demo-mode auth containment for seeded demo accounts and shortcut switching
+
+### Role Semantics In The Current UI
+
+- `resident`: submits and tracks their own reports
+- `reception_admin`: front desk / intake role for note-taking and clarification
+- `triage_officer`: property manager role for triage and scheduling
+- `coordinator`: dispatch coordinator role for assignment and operational rerouting
+- `contractor`: contractor or maintenance technician role for execution updates
+- `admin`: system admin role kept for bootstrap/demo/admin oversight
 
 ### Guard Conditions
 
@@ -42,112 +52,28 @@ Date: `2026-03-21 16:20:58 +11:00`
 | assignment clear rollback | clearing the last assignee without an explicit status change rolls the job back to `new` or `triaged` |
 | assignment exclusivity | org assignment and direct contractor assignment cannot both be present |
 | triage permissions | only `triage_officer` or `admin` can move jobs to `triaged`, `scheduled`, or `follow_up_scheduled` |
-| coordination permissions | only `coordinator` or `admin` can change assignment, reopen, escalate, or cancel |
-| accountability requirement | branch states such as `on_hold`, `blocked`, `reopened`, `follow_up_scheduled`, and `escalated` require `reason_code`; `completed` requires an explicit `reason_code` or `responsibility_stage` |
+| coordination permissions | only `coordinator` or `admin` can change dispatch targets |
+| contractor execution scope | contractors can move work through execution states but cannot place jobs on hold from the UI |
+| accountability requirement | branch states such as `on_hold`, `blocked`, `reopened`, `follow_up_scheduled`, and `escalated` require `reason_code`; `completed` requires explicit accountability metadata |
+| structured location validation | report creation requires an org-scoped, managed child `space` or `unit` location |
 
 ## Verification Evidence
 
-- required runtime verification command: `.\.venv\Scripts\python.exe -m pytest -q`
+- required runtime verification command: `.\.venv\Scripts\python.exe -m pytest tests\test_schema.py tests\test_migrations.py tests\test_app.py -q`
 - current run execution status: verified locally in this environment
-- latest recorded successful result in this run: `27 passed`
-- runtime coverage in this run includes migration upgrade/downgrade smoke, Alembic target-precedence coverage, startup schema enforcement, auth gating, org boundary checks, location validation, lifecycle progression, direct contractor assignment, assignment rollback invariants, role gating, follow-up rules, and note-only event creation
+- latest recorded successful result in this pass: `33 passed`
+- runtime coverage in this pass includes migration bootstrap and round-trip smoke, placeholder-location cleanup, startup schema enforcement, browser login behavior, demo gating, org boundary checks, location validation, lifecycle progression, direct contractor assignment, assignment rollback invariants, role gating, follow-up rules, note-only event creation, and role-appropriate UI controls
 
-## Remaining TODO (Proposed)
+## Remaining Risks
 
-- split resident request from execution work order if one resident issue must spawn multiple contractor tracks
-- add a first-class visit/appointment entity instead of representing scheduling only as status plus timeline events
-- decide whether the legacy `admin` umbrella role should remain long term or be fully replaced by capability-style permissions
+- downgrade behavior is still best treated as smoke coverage rather than perfect historical rollback
+- assets remain lightweight and name-driven; they are more structured than before but not yet a governed asset registry
+- the current model still uses `Job` as the single operational object until the later Phase 1 split
 
-## Run Log: `2026-03-21 16:20:58 +11:00`
+## Deferred For Phase 1
 
-### Delivered In This Run
-
-- stabilized startup around a migrations-first contract: the app now refuses to boot when the schema is not at Alembic head
-- removed test assumptions that relied on header-based auth and verified the current signed-cookie session flow instead
-- verified there is no runtime `create_all()` bootstrap path and added migration smoke coverage, including explicit-config-vs-environment Alembic target protection
-- tightened the current resident reporting flow around structured `location_id` selection and org-scoped location validation
-- verified same-org access controls for resident and operations users, plus direct contractor dispatch visibility rules
-- refreshed README and assessment docs so the documented boot/auth/location model matches the implementation
-
-### Outcome
-
-- the repo is now in a safer pre-Phase-1 state: boot is deterministic, migrations are authoritative, demo auth is explicitly gated, and the current report/job object is backed by real organisation and location references
-- the larger Phase 1 request -> work-order -> visit/dispatch split remains intentionally deferred
-
-## Run Log: `2026-03-19 16:03:23 +11:00`
-
-### Delivered In This Run
-
-- scanned commit evidence since automation last run (`2026-03-19T04:09:45.240Z`) and in the last 24 hours.
-- reviewed concrete commit diffs:
-  - `0668f89ad113dba36ecf399066f08d8c5defc14f`
-  - `b98e309fd74a5edf074606b33d4961799decefb7`
-- verified resident-reported workflow coverage and edge-case intent by inspecting current tests (`tests/test_app.py`, `tests/test_schema.py`) and workflow guards in `app/services/workflow.py`.
-- attempted required runtime flow (`python -m pip install -e .[dev]`, `python -m pytest`, fallback checks), but interpreter tooling is unavailable in this sandbox.
-
-### Outcome
-
-- no additional minimal code fix was applied because current commit evidence did not show a new concrete regression requiring patching.
-- proposed product tracks still pending are request/work-order split (`A2`) and structured visits/routing records (`A4`).
-
-## Run Log: `2026-03-19 15:24:12 +11:00`
-
-### Delivered In This Run
-
-- extracted workflow/state-machine helpers into `app/services/workflow.py`
-- moved API consumers onto the workflow service for transition guards, event defaults, and assignment fallback behavior
-- tightened completion accountability so `completed` now requires explicit `reason_code` or `responsibility_stage`
-- updated the operations and contractor pages so prompted reason codes can be supplied for guarded transitions, and contractor completion sends `responsibility_stage=execution`
-- expanded app tests for `blocked`, `on_hold`, `reopened`, and explicit completion-accountability paths
-- verified the focused schema/app suite and lint checks in this environment
-
-### Outcome
-
-- the refined Student Living workflow is now implemented with a dedicated workflow service layer, stronger accountability on completion, and broader executable regression coverage
-- this workspace still contains older dirty-worktree documentation entries with later timestamps than the current environment clock; the timestamp above reflects the actual runtime-verification session for this pass
-
-## Run Log: `2026-03-19 15:12:17 +11:00`
-
-### Delivered In This Run
-
-- scanned commits since automation `Last run: 2026-03-19T04:00:56.070Z`.
-- reviewed concrete commit evidence:
-  - `9c0a0b5397318d6d2a97774ade77e73de0ed0482`
-  - `f7877bd00ca0e4837f82db0364d73bcde83310ab`
-- validated resident-reported problem flow coverage by test intent review (`create -> assign -> triage -> schedule -> in_progress -> completed`) and edge cases (direct independent contractor dispatch, assignment clear rollback, role gating, follow-up reason requirements, mutual exclusivity guards).
-- updated documentation logs only; no README diagram changes were needed in this run.
-
-### Outcome
-
-- no additional minimal fix was applied because commit diffs did not provide strong concrete evidence of a new regression beyond the already-landed assignment-detail correction.
-- product TODO tracks `A2`, `A3`, and `A4` remain open and require implementation work plus executable runtime validation in an environment where `python -m pytest` can run.
-
-## Run Log: `2026-03-19 17:20:00 +11:00`
-
-### Delivered In This Run
-
-- extended the lifecycle with triage, scheduling, follow-up, and escalation states
-- introduced direct contractor dispatch and assignee invariants
-- added structured event metadata and organisation hierarchy
-- refreshed README and architecture docs with simplified lifecycle visuals and concrete API examples
-- added Alembic migration `20260319_0005_operational_workflow_refactor.py`
-
-### Outcome
-
-The resident-admin-contractor workflow now better matches a realistic Student Living operating model while preserving the newer location/asset foundation added earlier in the repository.
-
-## Run Log: `2026-03-19 15:04:12 +11:00`
-
-### Delivered In This Run
-
-- scanned commits since last automation run (`2026-03-19T03:31:31.650Z`) and in the last 24 hours.
-- confirmed there are no new commits since the last run; latest 24h commit remains `dcef84a5c27b2f611e9f0ccfca4777109e4c7d87`.
-- applied a minimal workflow consistency fix in `app/api/jobs.py`: permission error text now states `Only coordinators or admins can change assignment`, matching actual role checks.
-
-### Verification Status
-
-- attempted required runtime flow:
-  - `python -m pip install -e .[dev]`
-  - `python -m pytest --version`
-  - `python -m pytest`
-- execution is blocked in this environment (`python`/`py` unavailable and `.venv\\Scripts\\python.exe` cannot be executed due access denied), so this run is static/code-evidence verified only.
+- request -> work-order split
+- structured visit/dispatch records
+- richer routing-decision persistence
+- public reporting, councils/homeowners, GIS/maps, and ownership verification flows
+- full RBAC, invites, password reset, or enterprise auth

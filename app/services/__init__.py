@@ -1,4 +1,5 @@
 from app.services.auth import AuthenticationError, authenticate_user
+from app.services.bootstrap import ensure_bootstrap_user
 from app.services.catalog import build_location_asset_catalog, find_or_create_asset
 from app.services.demo import ensure_demo_data, is_demo_user_email, list_demo_users
 from app.services.passwords import hash_password, verify_password
@@ -26,7 +27,9 @@ from app.services.workflow import (
     job_has_assignee,
     require_status_permission,
     role_label,
+    status_label,
     touch_job,
+    user_role_label,
     validate_assignee_required,
 )
 
@@ -54,6 +57,7 @@ __all__ = [
     "default_responsibility_owner",
     "default_stage_for_actor",
     "ensure_demo_data",
+    "ensure_bootstrap_user",
     "fallback_status_for_unassigned",
     "find_or_create_asset",
     "hash_password",
@@ -62,7 +66,9 @@ __all__ = [
     "list_demo_users",
     "require_status_permission",
     "role_label",
+    "status_label",
     "touch_job",
+    "user_role_label",
     "validate_assignee_required",
     "verify_password",
 ]

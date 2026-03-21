@@ -3,6 +3,7 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import (
@@ -21,6 +22,7 @@ from app.models import (
     Job,
     JobStatus,
     Location,
+    OwnerScope,
     Organisation,
     OrganisationType,
     ResponsibilityStage,
@@ -32,8 +34,10 @@ from app.services.catalog import is_reportable_location
 from app.services import (
     ASSIGNEE_REQUIRED_STATUSES,
     ASSIGNMENT_ROLES,
+    COORDINATION_ROLES,
     EventSpec,
     STATUS_EVENT_MESSAGES,
+    TRIAGE_ROLES,
     append_event,
     apply_status_change,
     assignee_label,
@@ -113,7 +117,6 @@ def get_job(
     current_user: User = Depends(get_current_user),
 ):
     return serialize_job(visible_job(session, current_user, job_id))
-
 
 def build_assignment_events(
     *,

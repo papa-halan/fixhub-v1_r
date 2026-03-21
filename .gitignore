@@ -13,9 +13,14 @@ htmlcov/
 venv/
 env/
 ENV/
+.tmp_env_override/
 .env
 .env.*
 .idea/
 *.egg-info/
 build/
 dist/
+*.db
+.auth-inspect-tmp/
+.pytest-tmp-phase*/
+tmp*/

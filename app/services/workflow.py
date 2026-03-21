@@ -7,6 +7,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.models import (
+    ContractorMode,
     Event,
     EventType,
     Job,
@@ -19,6 +20,28 @@ from app.models import (
 )
 
 
+ROLE_LABELS = {
+    UserRole.resident.value: "Resident",
+    UserRole.admin.value: "System Admin",
+    UserRole.reception_admin.value: "Front Desk",
+    UserRole.triage_officer.value: "Property Manager",
+    UserRole.coordinator.value: "Dispatch Coordinator",
+    UserRole.contractor.value: "Contractor",
+}
+STATUS_LABELS = {
+    JobStatus.new.value: "New",
+    JobStatus.assigned.value: "Assigned",
+    JobStatus.triaged.value: "Triaged",
+    JobStatus.scheduled.value: "Scheduled",
+    JobStatus.in_progress.value: "In Progress",
+    JobStatus.on_hold.value: "On Hold",
+    JobStatus.blocked.value: "Blocked",
+    JobStatus.completed.value: "Completed",
+    JobStatus.cancelled.value: "Cancelled",
+    JobStatus.reopened.value: "Reopened",
+    JobStatus.follow_up_scheduled.value: "Follow Up Scheduled",
+    JobStatus.escalated.value: "Escalated",
+}
 STATUS_EVENT_MESSAGES = {
     JobStatus.new: "Moved job back to new",
     JobStatus.assigned: "Marked job assigned",
@@ -141,7 +164,7 @@ ROLE_GROUPS_BY_TARGET = {
     JobStatus.triaged: TRIAGE_ROLES,
     JobStatus.scheduled: TRIAGE_ROLES,
     JobStatus.in_progress: (UserRole.contractor,),
-    JobStatus.on_hold: (*TRIAGE_ROLES, *COORDINATION_ROLES, UserRole.contractor),
+    JobStatus.on_hold: (*TRIAGE_ROLES, *COORDINATION_ROLES),
     JobStatus.blocked: (UserRole.contractor,),
     JobStatus.completed: (UserRole.contractor, UserRole.admin),
     JobStatus.cancelled: COORDINATION_ROLES,
@@ -166,7 +189,26 @@ def role_label(role: UserRole | str | None) -> str | None:
     if role is None:
         return None
     role_value = role.value if isinstance(role, UserRole) else role
-    return role_value.replace("_", " ").title()
+    if role_value == UserRole.contractor.value:
+        return ROLE_LABELS[role_value]
+    return ROLE_LABELS.get(role_value, role_value.replace("_", " ").title())
+
+
+def user_role_label(user: User) -> str:
+    if user.role == UserRole.contractor and user.organisation is not None:
+        contractor_mode = user.organisation.contractor_mode
+        if contractor_mode == ContractorMode.maintenance_team:
+            return "Maintenance Technician"
+        if contractor_mode == ContractorMode.external_contractor:
+            return "Contractor"
+    return role_label(user.role) or "User"
+
+
+def status_label(status: JobStatus | str | None) -> str | None:
+    if status is None:
+        return None
+    status_value = status.value if isinstance(status, JobStatus) else status
+    return STATUS_LABELS.get(status_value, status_value.replace("_", " ").title())
 
 
 def job_has_assignee(job: Job) -> bool:
@@ -265,7 +307,7 @@ def require_status_permission(actor: User, target: JobStatus) -> None:
     if actor.role not in allowed_roles:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"{role_label(actor.role)} cannot move a job to {target.value}",
+            detail=f"{user_role_label(actor)} cannot move a job to {target.value}",
         )
 
 

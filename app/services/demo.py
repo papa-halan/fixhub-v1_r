@@ -85,25 +85,25 @@ DEMO_USERS: tuple[DemoUser, ...] = (
         organisation_name="Student Living",
     ),
     DemoUser(
-        name="Avery Admin",
+        name="Sky System Admin",
         email="admin@fixhub.test",
         role=UserRole.admin,
         organisation_name="Student Living",
     ),
     DemoUser(
-        name="Remy Reception",
+        name="Fran Front Desk",
         email="reception@fixhub.test",
         role=UserRole.reception_admin,
         organisation_name="Student Living",
     ),
     DemoUser(
-        name="Taylor Triage",
+        name="Priya Property Manager",
         email="triage@fixhub.test",
         role=UserRole.triage_officer,
         organisation_name="Student Living",
     ),
     DemoUser(
-        name="Cory Coordinator",
+        name="Casey Dispatch Coordinator",
         email="coordinator@fixhub.test",
         role=UserRole.coordinator,
         organisation_name="Student Living",
@@ -115,13 +115,13 @@ DEMO_USERS: tuple[DemoUser, ...] = (
         organisation_name="Newcastle Plumbing",
     ),
     DemoUser(
-        name="Maddie Maintenance",
+        name="Maddie Maintenance Technician",
         email="maintenance.contractor@fixhub.test",
         role=UserRole.contractor,
         organisation_name="Campus Maintenance",
     ),
     DemoUser(
-        name="Indy Independent",
+        name="Indy Independent Contractor",
         email="independent.contractor@fixhub.test",
         role=UserRole.contractor,
         organisation_name="Independent Contractors",
@@ -384,9 +384,9 @@ def ensure_demo_data(session: Session, *, demo_password: str) -> None:
 
 def list_demo_users(session: Session) -> Sequence[User]:
     emails = [demo.email for demo in DEMO_USERS]
-    users = list(session.scalars(select(User).where(User.email.in_(emails))))
+    users = list(session.scalars(select(User).where(User.is_demo_account.is_(True))))
     order = {email: index for index, email in enumerate(emails)}
-    users.sort(key=lambda user: order[user.email])
+    users.sort(key=lambda user: (order.get(user.email, len(order)), user.name))
     return users
 
 

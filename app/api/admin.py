@@ -22,6 +22,7 @@ from app.api.deps import (
     visible_jobs,
 )
 from app.models import User
+from app.services import ASSIGNMENT_ROLES, COORDINATION_ROLES, TRIAGE_ROLES
 
 
 router = APIRouter(prefix="/admin")
@@ -62,5 +63,9 @@ def admin_job_page(
         job=serialize_job(job),
         events=[serialize_event(event) for event in visible_events(session, job_id)],
         contractor_orgs=list_contractor_organisations(session),
-        contractor_users=list_contractor_users(session),
+        contractor_users=list_contractor_users(session, include_demo=request.app.state.settings.demo_mode),
+        can_change_assignment=current_user.role in ASSIGNMENT_ROLES,
+        can_mark_assigned=current_user.role in ASSIGNMENT_ROLES,
+        can_manage_triage=current_user.role in TRIAGE_ROLES,
+        can_manage_coordination=current_user.role in COORDINATION_ROLES,
     )

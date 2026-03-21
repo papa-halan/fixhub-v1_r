@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>FixHub Sign In</title>
   <link rel="stylesheet" href="/static/styles.css">
-  <script src="/static/app.js"></script>
 </head>
 <body>
   <main class="page-shell">
@@ -14,9 +13,9 @@
         <p class="eyebrow">Sign In</p>
         <h1>Enter FixHub</h1>
         <p class="muted">
-          Protected resident, admin, and contractor pages require an authenticated session.
+          Protected resident, front desk, coordination, and technician pages require an authenticated session.
           {% if demo_mode %}
-          Demo mode is active, so the seeded accounts below are available for local verification.
+          Demo mode is active, so the seeded accounts below are available for local verification only.
           {% endif %}
         </p>
         {% if auth_error %}
@@ -31,11 +30,11 @@
             <h2>Sign in</h2>
           </div>
         </div>
-        <form id="login-form" class="form-grid" method="post">
+        <form class="form-grid" method="post" action="/login">
           <input type="hidden" name="next_path" value="{{ next_path }}">
           <label>
             Email
-            <input type="email" name="email" placeholder="resident@fixhub.test" required>
+            <input type="email" name="email" value="{{ email_value }}" placeholder="name@example.com" required>
           </label>
           <label>
             Password
@@ -44,7 +43,6 @@
           <div class="actions">
             <button class="button" type="submit">Sign in</button>
           </div>
-          <p class="feedback" data-feedback></p>
         </form>
       </section>
 
@@ -60,26 +58,15 @@
         <div class="switcher-links">
           {% for demo in demo_users %}
           <a class="switcher-link" href="/switch-user?email={{ demo.email }}&next={{ demo.home_path }}">
-            {{ demo.label }}
+            {{ demo.label }} · {{ demo.role_label }}
           </a>
           {% endfor %}
         </div>
 
-        <p class="form-helper muted">Shared demo password: <code>{{ demo_password }}</code></p>
+        <p class="form-helper muted">Local demo password: <code>{{ demo_password }}</code></p>
       </section>
       {% endif %}
     </section>
   </main>
-
-  <script>
-    FixHub.wireJsonForm(document.getElementById("login-form"), async (formData) => {
-      const result = await FixHub.sendJson("/login", "POST", {
-        email: formData.get("email"),
-        password: formData.get("password"),
-        next_path: formData.get("next_path"),
-      });
-      window.location.href = result.redirect_path;
-    });
-  </script>
 </body>
 </html>

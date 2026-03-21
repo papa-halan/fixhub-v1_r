@@ -1,41 +1,29 @@
 # FixHub MVP
 
-FixHub is a maintenance workflow demo for a resident -> operations -> contractor lifecycle. Phase 0 stabilizes boot, schema authority, and auth boundaries. Phase 0.5 adds the minimum organisation and location structure needed to keep the current reporting flow valid without starting the larger Phase 1 request/work-order split.
+FixHub is a maintenance workflow demo for a resident -> operations -> contractor lifecycle.
 
-## Phase 0 Status
+The repository is currently stabilized through Phase 0.5:
 
 - Alembic migrations are the schema authority.
 - App startup fails fast if the database is not at Alembic head.
 - Runtime does not call `Base.metadata.create_all()`.
-- Auth is password login plus signed cookie sessions.
-- Demo users and shortcut switching are available only when `FIXHUB_DEMO_MODE=1`.
+- Auth uses password login plus signed cookie sessions.
+- Demo shortcuts are available only when `FIXHUB_DEMO_MODE=1`.
+- Reports use a structured `location_id`; free text stays descriptive-only in `location_detail_text`.
+- Organisation scoping is enforced for residents and operations users.
 
-## Phase 0.5 Foundation
+Phase 1 is still deferred. This repo does not yet implement the larger request -> work-order -> visit/dispatch split.
 
-- `users.organisation_id` is the primary org boundary for the current deployment.
-- `locations` belong to an organisation and now support `parent_id` plus typed hierarchy (`site`, `building`, `space`, `unit`).
-- `jobs.organisation_id` is stored directly.
-- Resident report creation uses `location_id` as the operational source of truth.
-- `location_detail_text` is optional descriptive text only.
-- Resident and operations access stays org-scoped, while contractor visibility stays tied to explicit dispatch.
+## Operational Roles
 
-## Current Workflow
+- `resident`: reporter / occupant who submits and tracks their own reports
+- `reception_admin`: front desk / intake user who can log notes and clarify details
+- `triage_officer`: property manager who triages and schedules work
+- `coordinator`: dispatch coordinator who assigns and reroutes operational work
+- `contractor`: contractor or maintenance technician who performs execution updates
+- `admin`: system admin account for environment/bootstrap/admin oversight
 
-- residents sign in and create a job against a managed location in their organisation
-- operations users coordinate intake, triage, scheduling, escalation, and follow-up
-- contractors move work through execution states
-- everyone reads the same shared timeline, with typed event metadata and stable location context
-
-## Roles
-
-- `resident`
-- `admin`
-- `reception_admin`
-- `triage_officer`
-- `coordinator`
-- `contractor`
-
-## Data Model
+## Current Data Model
 
 ```mermaid
 erDiagram
@@ -122,112 +110,37 @@ erDiagram
     JOBS ||--o{ EVENTS : has
 ```
 
-## Lifecycle
+Reportable operational locations are managed child `space` or `unit` rows. Root-level legacy placeholders are excluded from the active catalog.
 
-```mermaid
-stateDiagram-v2
-    [*] --> new
-    new --> assigned
-    assigned --> triaged
-    triaged --> scheduled
-    scheduled --> in_progress
-    in_progress --> completed
+## Current Workflow
 
-    assigned --> on_hold
-    triaged --> on_hold
-    scheduled --> on_hold
-    in_progress --> on_hold
-    in_progress --> blocked
+1. A resident signs in and submits a report against a managed location in their organisation.
+2. Front desk or operations staff add clarifying notes when needed.
+3. A dispatch coordinator assigns the work to a contractor organisation or a direct contractor.
+4. A property manager triages and schedules the job.
+5. The assigned contractor or technician moves the work through execution states.
+6. Everyone reads the same shared timeline with stable location and asset context.
 
-    assigned --> escalated
-    triaged --> escalated
-    scheduled --> escalated
-    in_progress --> escalated
+Supported job states:
 
-    completed --> reopened
-    completed --> follow_up_scheduled
-    follow_up_scheduled --> in_progress
-    reopened --> triaged
+- `new`
+- `assigned`
+- `triaged`
+- `scheduled`
+- `in_progress`
+- `on_hold`
+- `blocked`
+- `completed`
+- `cancelled`
+- `reopened`
+- `follow_up_scheduled`
+- `escalated`
 
-    cancelled --> [*]
-```
+## Auth And Run Modes
 
-## Guard Conditions
+### Demo Mode
 
-| Rule | Applies to | Effect |
-| --- | --- | --- |
-| Assignee required | `assigned`, `scheduled`, `in_progress`, `blocked`, `completed`, `follow_up_scheduled` | Transition is rejected unless `assigned_org_id` or `assigned_contractor_user_id` is set |
-| Assignment exclusivity | assignment updates | `assigned_org_id` and `assigned_contractor_user_id` cannot both be non-null |
-| Assignment clear rollback | clearing the last assignee without an explicit status change | job moves back to `new` or `triaged` instead of staying unassigned in an execution state |
-| Triage permission | `triaged`, `scheduled`, `follow_up_scheduled` | only `triage_officer` or `admin` can move jobs into these states |
-| Assignment permission | assignment field changes | only `coordinator` or `admin` can change dispatch target |
-| Completion accountability | `completed` | completion requires explicit accountability metadata |
-| Same-org report validation | resident report creation | `location_id` must belong to the acting user organisation and be a reportable location type |
-
-## Auth And Demo Mode
-
-- `POST /login` verifies a scrypt-hashed password and sets a signed `HttpOnly` session cookie.
-- Protected pages redirect back to `/` when the session is missing or invalid.
-- Demo shortcuts (`/switch-user` and the “View as” UI) are available only when `FIXHUB_DEMO_MODE=1`.
-- Demo-seeded databases should be treated as disposable local/demo environments, not promoted into default or production operation.
-
-Seeded demo users when demo mode is enabled:
-- `resident@fixhub.test`
-- `admin@fixhub.test`
-- `reception@fixhub.test`
-- `triage@fixhub.test`
-- `coordinator@fixhub.test`
-- `contractor@fixhub.test`
-- `maintenance.contractor@fixhub.test`
-- `independent.contractor@fixhub.test`
-
-Seeded demo organisations:
-- `University of Newcastle`
-- `Student Living`
-- `Newcastle Plumbing`
-- `Campus Maintenance`
-- `Independent Contractors`
-
-Shared demo password:
-- `fixhub-demo-password`
-
-## API Examples
-
-### Create A Resident Report
-
-```json
-POST /api/jobs
-{
-  "title": "Leaking bathroom tap",
-  "description": "Water is pooling under the sink.",
-  "location_id": "0d7dfe26-8a4f-4dd6-8758-ae8bbdd1839f",
-  "location_detail_text": "Near the bathroom door",
-  "asset_name": "Sink"
-}
-```
-
-### Dispatch Directly To An Independent Contractor
-
-```json
-PATCH /api/jobs/{job_id}
-{
-  "assigned_contractor_user_id": "2b53b4e8-6c72-4e89-9a3c-1bc7b9150b53"
-}
-```
-
-### Contractor Completes Work
-
-```json
-PATCH /api/jobs/{job_id}
-{
-  "status": "completed",
-  "responsibility_stage": "execution"
-}
-```
-
-## Run Modes
-
-### Local SQLite Demo
+Use demo mode for local verification with seeded organisations, users, locations, and assets.
 
 ```powershell
 pip install -e .[dev]
@@ -236,31 +149,43 @@ alembic upgrade head
 uvicorn app.main:app --reload
 ```
 
-### Local App + Docker Postgres
+When demo mode is enabled:
+
+- demo users are seeded if `FIXHUB_SEED_DEMO_DATA=1` or left implicit by demo mode
+- the login page shows local demo shortcuts
+- `/switch-user` is available for seeded demo accounts only
+
+### Normal Mode
+
+Use normal mode when you want real password login without demo shortcuts.
+
+On a fresh database, provide a one-time bootstrap user via environment variables:
 
 ```powershell
 pip install -e .[dev]
-docker compose up db -d
-$env:DATABASE_URL = "postgresql+psycopg://postgres:postgres@localhost:5432/fixhub"
-$env:FIXHUB_DEMO_MODE = "1"
-alembic upgrade head
-uvicorn app.main:app --reload
-```
-
-### Full Docker Stack
-
-```powershell
-docker compose up --build
-```
-
-### Production-Style Manual Run
-
-```powershell
-$env:DATABASE_URL = "postgresql+psycopg://postgres:postgres@localhost:5432/fixhub"
 $env:FIXHUB_DEMO_MODE = "0"
 $env:FIXHUB_SEED_DEMO_DATA = "0"
+$env:FIXHUB_BOOTSTRAP_USER_EMAIL = "ops.admin@example.com"
+$env:FIXHUB_BOOTSTRAP_USER_PASSWORD = "change-me-now"
+$env:FIXHUB_BOOTSTRAP_USER_NAME = "Operations Admin"
+$env:FIXHUB_BOOTSTRAP_USER_ORG_NAME = "Harbour Housing"
 alembic upgrade head
-uvicorn app.main:app --host 0.0.0.0 --port 8000
+uvicorn app.main:app --reload
+```
+
+Optional:
+
+- `FIXHUB_BOOTSTRAP_USER_ROLE` defaults to `admin`
+- `FIXHUB_SESSION_SECRET` should be set explicitly outside disposable local environments
+
+### Docker Demo Stack
+
+`docker compose up --build` starts the local demo stack. It is a demo-first path, not the normal-mode path.
+
+## Verification
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q
 ```
 
 ## Documentation
@@ -269,11 +194,4 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 - architecture notes: [docs/architecture.md](docs/architecture.md)
 - schema assessment: [docs/schema_student_living_assessment.md](docs/schema_student_living_assessment.md)
 - docs changelog: [docs/CHANGELOG.md](docs/CHANGELOG.md)
-
-## Verification
-
-Current implementation was verified with:
-
-```powershell
-.\.venv\Scripts\python.exe -m pytest -q
-```
+- handoff context: [docs/chat_context_2026-03-21.md](docs/chat_context_2026-03-21.md)

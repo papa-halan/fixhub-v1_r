@@ -21,6 +21,7 @@ from app.models import (
     UserRole,
 )
 from app.services import OPERATIONS_ROLES, assignee_label, assignee_scope, list_demo_users, role_label
+from app.services import status_label, user_role_label
 
 
 APP_DIR = Path(__file__).resolve().parents[1]
@@ -101,6 +102,12 @@ def lookup_current_user(
     request: Request,
     session: Session,
 ) -> tuple[bool, User | None]:
+    if hasattr(request.state, "current_user") and hasattr(request.state, "invalid_session"):
+        state_user = request.state.current_user
+        if state_user is not None and state_user.is_demo_account and not request.app.state.settings.demo_mode:
+            return True, None
+        return bool(request.state.invalid_session), state_user
+
     settings = request.app.state.settings
     token = (request.cookies.get(settings.session_cookie_name) or "").strip()
     if not token:
@@ -144,8 +151,8 @@ def navigation_for(user: User) -> list[dict[str, str]]:
             {"label": "My Reports", "href": "/resident/jobs"},
         ]
     if user.role in OPERATIONS_ROLES:
-        return [{"label": "Operations Job List", "href": "/admin/jobs"}]
-    return [{"label": "Assigned Jobs", "href": "/contractor/jobs"}]
+        return [{"label": "Operations Queue", "href": "/admin/jobs"}]
+    return [{"label": "Assigned Work", "href": "/contractor/jobs"}]
 
 
 def actor_name(event: Event) -> str:
@@ -163,6 +170,8 @@ def actor_role_value(event: Event) -> str | None:
 
 
 def actor_role_label(event: Event) -> str | None:
+    if event.actor_user:
+        return user_role_label(event.actor_user)
     return role_label(actor_role_value(event))
 
 
@@ -194,6 +203,7 @@ def serialize_user(user: User) -> dict[str, object]:
         "name": user.name,
         "email": user.email,
         "role": user.role.value,
+        "role_label": user_role_label(user),
         "organisation_id": organisation.id if organisation else None,
         "organisation_name": organisation.name if organisation else None,
         "organisation_type": organisation.type.value if organisation else None,
@@ -225,7 +235,7 @@ def serialize_job(job: Job) -> dict[str, object]:
         "asset_id": job.asset_id,
         "asset_name": job_asset_name(job),
         "status": job.status.value,
-        "status_label": role_label(job.status.value),
+        "status_label": status_label(job.status),
         "created_by": job.created_by,
         "created_by_name": job.creator.name,
         "assigned_org_id": job.assigned_org_id,
@@ -286,6 +296,7 @@ def serialize_demo_user(user: User) -> dict[str, str]:
         "email": user.email,
         "label": user.name,
         "role": user.role.value,
+        "role_label": user_role_label(user),
         "home_path": home_path_for(user.role),
     }
 
@@ -379,15 +390,19 @@ def render_login_page(
     session: Session,
     auth_error: str | None = None,
     next_path: str = "/",
+    email_value: str = "",
+    status_code: int = 200,
 ) -> HTMLResponse:
     demo_mode = request.app.state.settings.demo_mode
     return templates.TemplateResponse(
         request=request,
         name="login.html",
+        status_code=status_code,
         context={
             "request": request,
             "auth_error": auth_error,
             "next_path": next_path,
+            "email_value": email_value,
             "demo_mode": demo_mode,
             "demo_password": request.app.state.settings.demo_password if demo_mode else None,
             "demo_users": [serialize_demo_user(user) for user in list_demo_users(session)] if demo_mode else [],
@@ -410,17 +425,20 @@ def list_contractor_organisations(session: Session) -> list[dict[str, object]]:
     ]
 
 
-def list_contractor_users(session: Session) -> list[dict[str, object]]:
+def list_contractor_users(session: Session, *, include_demo: bool) -> list[dict[str, object]]:
+    stmt = (
+        select(User)
+        .options(joinedload(User.organisation))
+        .where(User.role == UserRole.contractor)
+        .order_by(User.name.asc())
+    )
+    if not include_demo:
+        stmt = stmt.where(User.is_demo_account.is_(False))
     return [
         {
             "id": user.id,
             "name": user.name,
             "organisation_name": user.organisation.name if user.organisation else None,
         }
-        for user in session.scalars(
-            select(User)
-            .options(joinedload(User.organisation))
-            .where(User.role == UserRole.contractor)
-            .order_by(User.name.asc())
-        )
+        for user in session.scalars(stmt)
     ]

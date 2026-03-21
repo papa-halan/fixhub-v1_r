@@ -12,6 +12,7 @@ class UserRead(SchemaModel):
     name: str
     email: str
     role: UserRole
+    role_label: str
     organisation_id: uuid.UUID | None = None
     organisation_name: str | None = None
     organisation_type: OrganisationType | None = None

@@ -14,7 +14,7 @@ from app.core.config import Settings, load_settings
 from app.core.database import build_engine, build_session_factory, require_schema_ready
 from app.core.security import verify_session_token
 from app.models import User
-from app.services import ensure_demo_data
+from app.services import ensure_bootstrap_user, ensure_demo_data
 
 
 def create_app(
@@ -22,12 +22,10 @@ def create_app(
     *,
     settings_override: Settings | None = None,
     demo_mode: bool | None = None,
-    allow_header_auth: bool | None = None,
 ) -> FastAPI:
     app_settings = settings_override or load_settings(
         database_url=database_url,
         demo_mode=demo_mode,
-        allow_header_auth=allow_header_auth,
     )
     if database_url is not None and app_settings.database_url != database_url:
         app_settings = replace(app_settings, database_url=database_url)
@@ -37,8 +35,6 @@ def create_app(
             demo_mode=demo_mode,
             seed_demo_data=app_settings.seed_demo_data if demo_mode else False,
         )
-    if allow_header_auth is not None and app_settings.allow_header_auth != allow_header_auth:
-        app_settings = replace(app_settings, allow_header_auth=allow_header_auth)
 
     engine = build_engine(app_settings.database_url)
     session_factory = build_session_factory(engine)
@@ -49,6 +45,25 @@ def create_app(
         if app_settings.seed_demo_data:
             with session_factory() as session:
                 ensure_demo_data(session, demo_password=app_settings.demo_password)
+                ensure_bootstrap_user(
+                    session,
+                    name=app_settings.bootstrap_user_name,
+                    email=app_settings.bootstrap_user_email,
+                    password=app_settings.bootstrap_user_password,
+                    organisation_name=app_settings.bootstrap_user_org_name,
+                    role=app_settings.bootstrap_user_role,
+                )
+                session.commit()
+        elif app_settings.bootstrap_user_email and app_settings.bootstrap_user_password:
+            with session_factory() as session:
+                ensure_bootstrap_user(
+                    session,
+                    name=app_settings.bootstrap_user_name,
+                    email=app_settings.bootstrap_user_email,
+                    password=app_settings.bootstrap_user_password,
+                    organisation_name=app_settings.bootstrap_user_org_name,
+                    role=app_settings.bootstrap_user_role,
+                )
                 session.commit()
         yield
 
@@ -73,15 +88,9 @@ def create_app(
                     user = auth_session.scalar(user_query().where(User.id == user_id).limit(1))
                 if user is None:
                     request.state.invalid_session = True
+                elif user.is_demo_account and not app_settings.demo_mode:
+                    request.state.invalid_session = True
                 else:
-                    request.state.current_user = user
-
-        if request.state.current_user is None and request.url.path.startswith("/api") and app_settings.allow_header_auth:
-            header_email = (request.headers.get("X-User-Email") or "").strip()
-            if header_email:
-                with session_factory() as auth_session:
-                    user = auth_session.scalar(user_query().where(User.email == header_email).limit(1))
-                if user is not None:
                     request.state.current_user = user
 
         if request.url.path.startswith("/api") and request.state.current_user is None:

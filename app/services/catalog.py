@@ -33,6 +33,7 @@ def build_location_asset_catalog(session: Session, *, user: User) -> list[dict[s
             .where(
                 Location.organisation_id == user.organisation_id,
                 Location.type.in_(REPORTABLE_LOCATION_TYPES),
+                Location.parent_id.is_not(None),
             )
             .options(selectinload(Location.assets))
             .order_by(Location.name.asc())
@@ -55,4 +56,4 @@ def build_location_asset_catalog(session: Session, *, user: User) -> list[dict[s
 
 
 def is_reportable_location(location: Location) -> bool:
-    return location.type in REPORTABLE_LOCATION_TYPES
+    return location.type in REPORTABLE_LOCATION_TYPES and location.parent_id is not None

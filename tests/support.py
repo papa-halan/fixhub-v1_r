@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from app.core.config import Settings, load_settings
 from app.main import create_app
+from app.models import UserRole
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -41,6 +42,11 @@ def build_settings(
     *,
     demo_mode: bool = True,
     seed_demo_data: bool | None = None,
+    bootstrap_user_email: str | None = None,
+    bootstrap_user_password: str | None = None,
+    bootstrap_user_name: str = "FixHub Test Admin",
+    bootstrap_user_org_name: str = "FixHub Test Org",
+    bootstrap_user_role: UserRole = UserRole.admin,
 ) -> Settings:
     base_settings = load_settings()
     resolved_seed_demo_data = demo_mode if seed_demo_data is None else seed_demo_data
@@ -52,6 +58,11 @@ def build_settings(
         demo_mode=demo_mode,
         seed_demo_data=resolved_seed_demo_data,
         demo_password=DEMO_PASSWORD,
+        bootstrap_user_email=bootstrap_user_email,
+        bootstrap_user_password=bootstrap_user_password,
+        bootstrap_user_name=bootstrap_user_name,
+        bootstrap_user_org_name=bootstrap_user_org_name,
+        bootstrap_user_role=bootstrap_user_role,
     )
 
 
@@ -60,6 +71,11 @@ def build_app(
     *,
     demo_mode: bool = True,
     seed_demo_data: bool | None = None,
+    bootstrap_user_email: str | None = None,
+    bootstrap_user_password: str | None = None,
+    bootstrap_user_name: str = "FixHub Test Admin",
+    bootstrap_user_org_name: str = "FixHub Test Org",
+    bootstrap_user_role: UserRole = UserRole.admin,
 ):
     database_url = sqlite_database_url(tmp_path / "fixhub.db")
     migrate_to_head(database_url)
@@ -67,6 +83,11 @@ def build_app(
         database_url,
         demo_mode=demo_mode,
         seed_demo_data=seed_demo_data,
+        bootstrap_user_email=bootstrap_user_email,
+        bootstrap_user_password=bootstrap_user_password,
+        bootstrap_user_name=bootstrap_user_name,
+        bootstrap_user_org_name=bootstrap_user_org_name,
+        bootstrap_user_role=bootstrap_user_role,
     )
     return create_app(settings_override=settings)
 
@@ -76,8 +97,22 @@ def build_client(
     *,
     demo_mode: bool = True,
     seed_demo_data: bool | None = None,
+    bootstrap_user_email: str | None = None,
+    bootstrap_user_password: str | None = None,
+    bootstrap_user_name: str = "FixHub Test Admin",
+    bootstrap_user_org_name: str = "FixHub Test Org",
+    bootstrap_user_role: UserRole = UserRole.admin,
 ):
-    app = build_app(tmp_path, demo_mode=demo_mode, seed_demo_data=seed_demo_data)
+    app = build_app(
+        tmp_path,
+        demo_mode=demo_mode,
+        seed_demo_data=seed_demo_data,
+        bootstrap_user_email=bootstrap_user_email,
+        bootstrap_user_password=bootstrap_user_password,
+        bootstrap_user_name=bootstrap_user_name,
+        bootstrap_user_org_name=bootstrap_user_org_name,
+        bootstrap_user_role=bootstrap_user_role,
+    )
     return app, TestClient(app)
 
 
@@ -90,13 +125,14 @@ def login_as(
 ):
     response = client.post(
         "/login",
-        json={
+        data={
             "email": email,
             "password": password,
             "next_path": next_path,
         },
+        follow_redirects=False,
     )
-    assert response.status_code == 200, response.text
+    assert response.status_code == 303, response.text
     return response
 
 

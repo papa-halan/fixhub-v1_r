@@ -74,7 +74,7 @@ def test_password_hash_round_trip() -> None:
     assert verify_password("fixhub-demo-password", None) is False
 
 
-def test_phase_zero_point_five_model_columns_are_present() -> None:
+def test_phase_zero_point_five_model_columns_are_present_without_phase_one_fields() -> None:
     assert "password_hash" in User.__table__.c
     assert "is_demo_account" in User.__table__.c
     assert User.__table__.c["is_demo_account"].nullable is False
@@ -86,6 +86,7 @@ def test_phase_zero_point_five_model_columns_are_present() -> None:
     assert "organisation_id" in Job.__table__.c
     assert "location_detail_text" in Job.__table__.c
     assert Job.__table__.c["organisation_id"].nullable is False
+    assert "request_id" not in Job.__table__.c
 
 
 def test_location_and_job_read_models_include_phase_zero_point_five_fields() -> None:

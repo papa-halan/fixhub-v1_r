@@ -4,7 +4,7 @@
 <section class="detail-grid">
   <article class="grid">
     <section class="panel">
-      <p class="eyebrow">Contractor</p>
+      <p class="eyebrow">{{ current_user.role_label }}</p>
       <h1>{{ job.title }}</h1>
       <div class="meta-list">
         <div class="meta-item">
@@ -44,7 +44,6 @@
       <div class="actions">
         <button class="button secondary" data-status="in_progress" type="button">Start work</button>
         <button class="button secondary" data-status="blocked" type="button">Mark blocked</button>
-        <button class="button secondary" data-status="on_hold" type="button">Put on hold</button>
         <button class="button secondary" data-status="completed" type="button">Mark completed</button>
       </div>
       <p class="feedback" id="contractor-status-feedback"></p>
@@ -88,7 +87,7 @@
       feedback.textContent = "";
       try {
         const payload = { status: button.dataset.status };
-        const statusesRequiringReason = new Set(["blocked", "on_hold"]);
+        const statusesRequiringReason = new Set(["blocked"]);
         if (statusesRequiringReason.has(button.dataset.status)) {
           const reasonCode = window.prompt("Enter a reason code for this transition:");
           if (reasonCode === null) {

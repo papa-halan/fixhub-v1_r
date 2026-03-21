@@ -64,7 +64,6 @@ def lookup_ids(app) -> dict[str, uuid.UUID]:
         "room_b8_location_id": locations["Block B Room 8"],
         "common_room_location_id": locations["Block A Common Room"],
         "building_a_location_id": locations["Block A"],
-        "campus_location_id": locations["Callaghan Campus"],
     }
 
 
@@ -166,42 +165,105 @@ def test_demo_auth_is_disabled_by_default(tmp_path) -> None:
         )
         login_response = client.post(
             "/login",
-            json={
+            data={
                 "email": "resident@fixhub.test",
                 "password": DEMO_PASSWORD,
                 "next_path": "/resident/report",
             },
-            follow_redirects=False,
         )
         api_me = client.get("/api/me")
 
     assert landing_page.status_code == 200
     assert "Demo Shortcuts" not in landing_page.text
-    assert "Shared demo password" not in landing_page.text
+    assert "Local demo password" not in landing_page.text
     assert switch_user.status_code == 404
-    assert login_response.status_code == 303
-    assert login_response.headers["location"] == "/?next=/login"
+    assert login_response.status_code == 401
+    assert "Invalid email or password" in login_response.text
     assert api_me.status_code == 401
     assert api_me.json() == {"detail": "Authentication required"}
 
 
-def test_login_sets_cookie_and_allows_api_and_page_access(tmp_path) -> None:
-    app, client = build_client(tmp_path)
+def test_normal_mode_bootstrap_login_sets_cookie_and_allows_access(tmp_path) -> None:
+    app, client = build_client(
+        tmp_path,
+        demo_mode=False,
+        seed_demo_data=False,
+        bootstrap_user_email="ops.admin@example.com",
+        bootstrap_user_password="ops-password",
+        bootstrap_user_name="Olivia Operations",
+        bootstrap_user_org_name="Harbour Housing",
+    )
 
     with client:
-        login_response = login_as(client, "resident@fixhub.test", next_path="/resident/report")
+        landing_page = client.get("/")
+        login_response = client.post(
+            "/login",
+            data={
+                "email": "ops.admin@example.com",
+                "password": "ops-password",
+                "next_path": "/admin/jobs",
+            },
+            follow_redirects=False,
+        )
         api_me = client.get("/api/me")
-        report_page = client.get("/resident/report")
+        queue_page = client.get("/admin/jobs")
+        home_redirect = client.get("/", follow_redirects=False)
         logout(client)
         api_after_logout = client.get("/api/me")
 
-    assert login_response.json() == {"redirect_path": "/resident/report"}
-    assert client.cookies.get(app.state.settings.session_cookie_name) is None
+    assert landing_page.status_code == 200
+    assert "Demo Shortcuts" not in landing_page.text
+    assert login_response.status_code == 303
+    assert login_response.headers["location"] == "/admin/jobs"
     assert api_me.status_code == 200
-    assert api_me.json()["email"] == "resident@fixhub.test"
-    assert report_page.status_code == 200
-    assert "Create Job" in report_page.text
+    assert api_me.json()["email"] == "ops.admin@example.com"
+    assert queue_page.status_code == 200
+    assert "System Admin" in queue_page.text
+    assert "Demo view" not in queue_page.text
+    assert home_redirect.status_code == 303
+    assert home_redirect.headers["location"] == "/admin/jobs"
+    assert client.cookies.get(app.state.settings.session_cookie_name) is None
     assert api_after_logout.status_code == 401
+
+
+def test_login_failure_renders_inline_error_in_normal_mode(tmp_path) -> None:
+    app, client = build_client(
+        tmp_path,
+        demo_mode=False,
+        seed_demo_data=False,
+        bootstrap_user_email="ops.admin@example.com",
+        bootstrap_user_password="ops-password",
+    )
+
+    with client:
+        response = client.post(
+            "/login",
+            data={
+                "email": "ops.admin@example.com",
+                "password": "wrong-password",
+                "next_path": "/admin/jobs",
+            },
+        )
+
+    assert response.status_code == 401
+    assert "Invalid email or password" in response.text
+    assert "ops.admin@example.com" in response.text
+    assert client.cookies.get(app.state.settings.session_cookie_name) is None
+
+
+def test_demo_switcher_visible_only_in_demo_mode(tmp_path) -> None:
+    _, client = build_client(tmp_path)
+
+    with client:
+        landing_page = client.get("/")
+        login_as(client, "resident@fixhub.test", next_path="/resident/report")
+        report_page = client.get("/resident/report")
+
+    assert landing_page.status_code == 200
+    assert "Demo Shortcuts" in landing_page.text
+    assert "Local demo password" in landing_page.text
+    assert report_page.status_code == 200
+    assert "Demo view" in report_page.text
 
 
 def test_startup_requires_migrated_schema(tmp_path) -> None:
@@ -292,6 +354,39 @@ def test_resident_report_page_lists_reportable_locations_only(tmp_path) -> None:
     assert "Sink" in report_page.text
 
 
+def test_legacy_placeholder_locations_are_hidden_from_catalog_and_rejected(tmp_path) -> None:
+    app, client = build_client(tmp_path)
+
+    with client:
+        ids = lookup_ids(app)
+        with app.state.SessionLocal() as session:
+            legacy_location = Location(
+                organisation_id=ids["student_living_org_id"],
+                name="a",
+                type=LocationType.space,
+            )
+            session.add(legacy_location)
+            session.commit()
+            session.refresh(legacy_location)
+
+        login_as(client, "resident@fixhub.test", next_path="/resident/report")
+        report_page = client.get("/resident/report")
+        create_response = client.post(
+            "/api/jobs",
+            json={
+                "title": "Should fail",
+                "description": "Legacy placeholder locations are not reportable.",
+                "location_id": str(legacy_location.id),
+                "asset_name": "Pump",
+            },
+        )
+
+    assert report_page.status_code == 200
+    assert ">a</option>" not in report_page.text
+    assert create_response.status_code == 422
+    assert create_response.json() == {"detail": "Choose a valid location"}
+
+
 def test_report_creation_rejects_non_reportable_and_cross_org_location_usage(tmp_path) -> None:
     app, client = build_client(tmp_path)
 
@@ -310,10 +405,18 @@ def test_report_creation_rejects_non_reportable_and_cross_org_location_usage(tmp
         )
 
         with app.state.SessionLocal() as session:
+            contractor_building = Location(
+                organisation_id=ids["newcastle_plumbing_org_id"],
+                name="Plumbing Depot",
+                type=LocationType.building,
+            )
+            session.add(contractor_building)
+            session.flush()
             contractor_location = Location(
                 organisation_id=ids["newcastle_plumbing_org_id"],
                 name="Plumbing Warehouse",
                 type=LocationType.space,
+                parent_id=contractor_building.id,
             )
             session.add(contractor_location)
             session.commit()
@@ -357,7 +460,7 @@ def test_same_org_access_rules_block_other_org_admins_from_viewing_jobs(tmp_path
             session.add_all([outsider_org, outsider_user])
             session.commit()
 
-        login_as(client, "harriet.housing@fixhub.test", password="other-password")
+        login_as(client, "harriet.housing@fixhub.test", password="other-password", next_path="/admin/jobs")
         response = client.get(f"/api/jobs/{job['id']}")
 
     assert response.status_code == 403
@@ -625,7 +728,7 @@ def test_manual_event_endpoint_is_note_only_and_residents_cannot_add_events(tmp_
     assert valid_note.json()["event_type"] == "note"
 
 
-def test_operations_job_page_includes_direct_assignment_control_with_demo_switch(tmp_path) -> None:
+def test_operations_job_page_includes_assignment_controls_for_dispatch_roles(tmp_path) -> None:
     app, client = build_client(tmp_path)
 
     with client:
@@ -640,3 +743,49 @@ def test_operations_job_page_includes_direct_assignment_control_with_demo_switch
     assert 'name="assigned_org_id"' in page.text
     assert 'name="assigned_contractor_user_id"' in page.text
     assert "Choose either an organisation or a direct contractor." in page.text
+    assert 'data-status="scheduled"' not in page.text
+
+
+def test_operations_pages_hide_controls_by_role(tmp_path) -> None:
+    app, client = build_client(tmp_path)
+
+    with client:
+        ids = lookup_ids(app)
+        switch_demo_user(client, "resident@fixhub.test")
+        job = create_job(client, location_id=ids["room_a14_location_id"], title="Access query")
+
+        switch_demo_user(client, "reception@fixhub.test", next_path=f"/admin/jobs/{job['id']}")
+        reception_page = client.get(f"/admin/jobs/{job['id']}")
+
+        switch_demo_user(client, "triage@fixhub.test", next_path=f"/admin/jobs/{job['id']}")
+        triage_page = client.get(f"/admin/jobs/{job['id']}")
+
+    assert reception_page.status_code == 200
+    assert 'name="assigned_org_id"' not in reception_page.text
+    assert 'data-status="triaged"' not in reception_page.text
+    assert "Add event" in reception_page.text
+
+    assert triage_page.status_code == 200
+    assert 'name="assigned_org_id"' not in triage_page.text
+    assert 'data-status="triaged"' in triage_page.text
+    assert 'data-status="scheduled"' in triage_page.text
+    assert 'data-status="escalated"' not in triage_page.text
+
+
+def test_contractor_job_page_hides_on_hold_control(tmp_path) -> None:
+    app, client = build_client(tmp_path)
+
+    with client:
+        ids = lookup_ids(app)
+        switch_demo_user(client, "resident@fixhub.test")
+        job = create_job(client, location_id=ids["room_a14_location_id"])
+        move_to_in_progress(client, job["id"], assigned_org_id=ids["newcastle_plumbing_org_id"])
+
+        switch_demo_user(client, "contractor@fixhub.test", next_path=f"/contractor/jobs/{job['id']}")
+        page = client.get(f"/contractor/jobs/{job['id']}")
+
+    assert page.status_code == 200
+    assert 'data-status="in_progress"' in page.text
+    assert 'data-status="blocked"' in page.text
+    assert 'data-status="completed"' in page.text
+    assert 'data-status="on_hold"' not in page.text
