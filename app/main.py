@@ -88,8 +88,6 @@ def create_app(
                     user = auth_session.scalar(user_query().where(User.id == user_id).limit(1))
                 if user is None:
                     request.state.invalid_session = True
-                elif user.is_demo_account and not app_settings.demo_mode:
-                    request.state.invalid_session = True
                 else:
                     request.state.current_user = user
 

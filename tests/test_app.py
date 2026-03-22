@@ -226,6 +226,53 @@ def test_normal_mode_bootstrap_login_sets_cookie_and_allows_access(tmp_path) -> 
     assert api_after_logout.status_code == 401
 
 
+def test_normal_mode_can_log_in_seeded_demo_users_without_demo_shortcuts(tmp_path) -> None:
+    app, client = build_client(
+        tmp_path,
+        demo_mode=False,
+        seed_demo_data=True,
+        bootstrap_user_email="ops.admin@example.com",
+        bootstrap_user_password="ops-password",
+    )
+
+    with client:
+        landing_page = client.get("/")
+        switch_user = client.get(
+            "/switch-user",
+            params={"email": "resident@fixhub.test", "next": "/resident/report"},
+            follow_redirects=False,
+        )
+        login_response = client.post(
+            "/login",
+            data={
+                "email": "resident@fixhub.test",
+                "password": DEMO_PASSWORD,
+                "next_path": "/resident/report",
+            },
+            follow_redirects=False,
+        )
+        api_me = client.get("/api/me")
+        report_page = client.get("/resident/report")
+        home_redirect = client.get("/", follow_redirects=False)
+        logout(client)
+        api_after_logout = client.get("/api/me")
+
+    assert landing_page.status_code == 200
+    assert "Demo Shortcuts" not in landing_page.text
+    assert "Local demo password" not in landing_page.text
+    assert switch_user.status_code == 404
+    assert login_response.status_code == 303
+    assert login_response.headers["location"] == "/resident/report"
+    assert api_me.status_code == 200
+    assert api_me.json()["email"] == "resident@fixhub.test"
+    assert report_page.status_code == 200
+    assert "Demo view" not in report_page.text
+    assert home_redirect.status_code == 303
+    assert home_redirect.headers["location"] == "/resident/report"
+    assert client.cookies.get(app.state.settings.session_cookie_name) is None
+    assert api_after_logout.status_code == 401
+
+
 def test_login_failure_renders_inline_error_in_normal_mode(tmp_path) -> None:
     app, client = build_client(
         tmp_path,

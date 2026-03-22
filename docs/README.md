@@ -1,6 +1,6 @@
 # Documentation Index
 
-Last updated: `2026-03-21 18:31:16 +11:00`
+Last updated: `2026-03-22 17:15:11 +11:00`
 
 ## Document Metadata
 
@@ -24,7 +24,7 @@ This folder stores implementation-aligned notes for the current FixHub MVP.
 
 ## Current Documentation Focus
 
-- README documents the migrations-first boot flow, signed-session auth, explicit demo vs normal startup, and the current org/location/job/event model
+- README documents the migrations-first boot flow, signed-session auth, explicit demo vs normal startup, the seeded demo login roster, and the current org/location/job/event model
 - the schema assessment records the corrected Phase 0.5 foundation: structured locations, same-org validation, real login in normal mode, explicit demo gating, and current workflow guards
 - the handoff context file captures the latest strategic planning, digital-twin positioning, roadmap, and GitHub backlog work
 - architecture notes show how residents, operations roles, and contractors share the same timeline

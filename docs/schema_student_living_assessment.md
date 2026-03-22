@@ -1,6 +1,6 @@
 # Schema Assessment: Student Living Workflow
 
-Date: `2026-03-21 18:31:16 +11:00`
+Date: `2026-03-22 17:15:11 +11:00`
 
 ## Document Metadata
 
@@ -17,6 +17,7 @@ Date: `2026-03-21 18:31:16 +11:00`
 - operations roles are split across `reception_admin`, `triage_officer`, and `coordinator`
 - users authenticate via password login plus signed session cookies
 - demo shortcuts are rendered only when `demo_mode` is enabled
+- seeded demo accounts can also authenticate in normal mode when `FIXHUB_SEED_DEMO_DATA=1`, but shortcut switching stays demo-only
 - normal mode supports an optional bootstrap non-demo user through startup environment variables
 - runtime startup requires the database to be at Alembic head before serving traffic
 - locations support `parent_id` and `type`, and resident report creation uses structured `location_id`

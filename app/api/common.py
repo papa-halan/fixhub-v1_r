@@ -96,7 +96,6 @@ async def login(
             session,
             email=payload.email,
             password=payload.password,
-            demo_mode=request.app.state.settings.demo_mode,
         )
     except AuthenticationError as exc:
         if expects_json:

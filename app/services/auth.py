@@ -22,7 +22,6 @@ def authenticate_user(
     *,
     email: str,
     password: str,
-    demo_mode: bool,
 ) -> User:
     user = session.scalar(
         select(User)
@@ -31,7 +30,5 @@ def authenticate_user(
         .limit(1)
     )
     if user is None or not verify_password(password, user.password_hash):
-        raise AuthenticationError()
-    if user.is_demo_account and not demo_mode:
         raise AuthenticationError()
     return user

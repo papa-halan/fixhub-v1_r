@@ -138,23 +138,6 @@ Supported job states:
 
 ## Auth And Run Modes
 
-#### Seeded Login Details
-
-When `FIXHUB_DEMO_MODE=1`, the app seeds these demo users. All demo accounts use the shared password `fixhub-demo-password`.
-
-| Name                          | Role              | Email                                |
-|-------------------------------|-------------------|--------------------------------------|
-| Riley Resident                | `resident`        | `resident@fixhub.test`               |
-| Sky System Admin              | `admin`           | `admin@fixhub.test`                  |
-| Fran Front Desk               | `reception_admin` | `reception@fixhub.test`              |
-| Priya Property Manager        | `triage_officer`  | `triage@fixhub.test`                 |
-| Casey Dispatch Coordinator    | `coordinator`     | `coordinator@fixhub.test`            |
-| Devon Contractor              | `contractor`      | `contractor@fixhub.test`             |
-| Maddie Maintenance Technician | `contractor`      | `maintenance.contractor@fixhub.test` |
-| Indy Independent Contractor   | `contractor`      | `independent.contractor@fixhub.test` |
-
-In normal mode, the app can also seed one bootstrap user when both `FIXHUB_BOOTSTRAP_USER_EMAIL` and `FIXHUB_BOOTSTRAP_USER_PASSWORD` are set. That account logs in with the exact email and password values you provide. If you use the example in this README, the bootstrap login is `ops.admin@example.com` with password `change-me-now`.
-
 ## Local Migrations
 
 Alembic now resolves the database target the same way as app startup:
@@ -199,6 +182,21 @@ When demo mode is enabled:
 - the login page shows local demo shortcuts
 - `/switch-user` is available for seeded demo accounts only
 
+#### Seeded Login Details
+
+When `FIXHUB_DEMO_MODE=1`, the app seeds these demo users. All demo accounts use the shared password `fixhub-demo-password`.
+
+| Name | Role | Email |
+| --- | --- | --- |
+| Riley Resident | `resident` | `resident@fixhub.test` |
+| Sky System Admin | `admin` | `admin@fixhub.test` |
+| Fran Front Desk | `reception_admin` | `reception@fixhub.test` |
+| Priya Property Manager | `triage_officer` | `triage@fixhub.test` |
+| Casey Dispatch Coordinator | `coordinator` | `coordinator@fixhub.test` |
+| Devon Contractor | `contractor` | `contractor@fixhub.test` |
+| Maddie Maintenance Technician | `contractor` | `maintenance.contractor@fixhub.test` |
+| Indy Independent Contractor | `contractor` | `independent.contractor@fixhub.test` |
+
 ### Normal Mode
 
 Use normal mode when you want real password login without demo shortcuts.
@@ -208,7 +206,7 @@ On a fresh database, provide a one-time bootstrap user via environment variables
 ```powershell
 pip install -e .[dev]
 $env:FIXHUB_DEMO_MODE = "0"
-$env:FIXHUB_SEED_DEMO_DATA = "0"
+$env:FIXHUB_SEED_DEMO_DATA = "1"
 $env:FIXHUB_BOOTSTRAP_USER_EMAIL = "ops.admin@example.com"
 $env:FIXHUB_BOOTSTRAP_USER_PASSWORD = "change-me-now"
 $env:FIXHUB_BOOTSTRAP_USER_NAME = "Operations Admin"
@@ -217,8 +215,13 @@ alembic upgrade head
 uvicorn app.main:app --reload
 ```
 
+The normal-mode bootstrap user is seeded only when both `FIXHUB_BOOTSTRAP_USER_EMAIL` and `FIXHUB_BOOTSTRAP_USER_PASSWORD` are set. That account logs in with the exact email and password values you provide. In the example above, the bootstrap login is `ops.admin@example.com` with password `change-me-now`.
+
+If you also set `FIXHUB_SEED_DEMO_DATA=1`, all seeded demo users listed above are created in normal mode as well, and they can sign in through the normal login form with `fixhub-demo-password`. Demo shortcuts and `/switch-user` still stay disabled unless `FIXHUB_DEMO_MODE=1`.
+
 Optional:
 
+- set `FIXHUB_SEED_DEMO_DATA = "0"` if you want a bootstrap-only normal-mode environment
 - `FIXHUB_BOOTSTRAP_USER_ROLE` defaults to `admin`
 - `FIXHUB_SESSION_SECRET` should be set explicitly outside disposable local environments
 

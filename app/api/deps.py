@@ -103,10 +103,7 @@ def lookup_current_user(
     session: Session,
 ) -> tuple[bool, User | None]:
     if hasattr(request.state, "current_user") and hasattr(request.state, "invalid_session"):
-        state_user = request.state.current_user
-        if state_user is not None and state_user.is_demo_account and not request.app.state.settings.demo_mode:
-            return True, None
-        return bool(request.state.invalid_session), state_user
+        return bool(request.state.invalid_session), request.state.current_user
 
     settings = request.app.state.settings
     token = (request.cookies.get(settings.session_cookie_name) or "").strip()
@@ -119,8 +116,6 @@ def lookup_current_user(
 
     user = session.scalar(user_query().where(User.id == user_id).limit(1))
     if user is None:
-        return True, None
-    if user.is_demo_account and not settings.demo_mode:
         return True, None
     return False, user
 

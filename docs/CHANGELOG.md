@@ -6,6 +6,17 @@
 - Reviewer: `schema-test-automation`
 - Status: `active`
 
+## [0.6.2] - 2026-03-22 17:15:11 +11:00
+
+### Changed
+- documented the seeded demo login roster and shared demo password in `README.md`
+- documented that normal mode can explicitly seed the demo users for full-suite verification while keeping demo shortcuts and `/switch-user` disabled
+- aligned auth/session behavior so seeded demo accounts can sign in anywhere they are intentionally created, instead of being rejected outside demo mode
+
+### Notes
+- verification reached `.\.venv\Scripts\python.exe -m pytest` with one docs-freshness follow-up still pending at the time of this changelog entry
+- targeted auth regression coverage passed for bootstrap-only normal mode, unseeded normal mode, and normal mode with seeded demo users
+
 ## [0.6.1] - 2026-03-21 18:31:16 +11:00
 
 ### Changed
