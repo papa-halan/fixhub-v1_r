@@ -6,6 +6,18 @@
 - Reviewer: `schema-test-automation`
 - Status: `active`
 
+## [0.6.3] - 2026-03-22 17:40:31 +11:00
+
+### Added
+- added `docs/uon_student_living_maintenance_context.md` as an append-only research log for the University of Newcastle Student Living maintenance workflow
+
+### Changed
+- updated `docs/README.md` to index the new UoN maintenance-context research log and reflect the latest documentation timestamp
+
+### Notes
+- this run is documentation and research only; no application code was changed
+- external evidence came from current UoN Student Living 2026 resource pages, guides, and terms
+
 ## [0.6.2] - 2026-03-22 17:15:11 +11:00
 
 ### Changed

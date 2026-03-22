@@ -1,6 +1,6 @@
 # Documentation Index
 
-Last updated: `2026-03-22 17:15:11 +11:00`
+Last updated: `2026-03-22 17:40:31 +11:00`
 
 ## Document Metadata
 
@@ -19,6 +19,7 @@ This folder stores implementation-aligned notes for the current FixHub MVP.
 - [chat_context_2026-03-21.md](chat_context_2026-03-21.md): handoff context for the March 2026 planning and roadmap chat
 - [documentation_sop.md](documentation_sop.md): documentation update rules and freshness-gate expectations
 - [known_issues.md](known_issues.md): environment and tooling caveats
+- [uon_student_living_maintenance_context.md](uon_student_living_maintenance_context.md): append-only research log mapping the real UoN Student Living maintenance process onto FixHub's workflow model
 - [schema_student_living_assessment.md](schema_student_living_assessment.md): current workflow assessment and verification summary
 - [todo_implementation_checklist.md](todo_implementation_checklist.md): remaining backlog checklist
 
@@ -27,6 +28,7 @@ This folder stores implementation-aligned notes for the current FixHub MVP.
 - README documents the migrations-first boot flow, signed-session auth, explicit demo vs normal startup, the seeded demo login roster, and the current org/location/job/event model
 - the schema assessment records the corrected Phase 0.5 foundation: structured locations, same-org validation, real login in normal mode, explicit demo gating, and current workflow guards
 - the handoff context file captures the latest strategic planning, digital-twin positioning, roadmap, and GitHub backlog work
+- the UoN Student Living maintenance context log captures current real-world actor and workflow evidence so future FixHub modeling stays grounded in the university's actual operating process
 - architecture notes show how residents, operations roles, and contractors share the same timeline
 - the changelog records what changed and how it was verified
 
