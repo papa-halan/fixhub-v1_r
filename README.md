@@ -138,6 +138,23 @@ Supported job states:
 
 ## Auth And Run Modes
 
+#### Seeded Login Details
+
+When `FIXHUB_DEMO_MODE=1`, the app seeds these demo users. All demo accounts use the shared password `fixhub-demo-password`.
+
+| Name                          | Role              | Email                                |
+|-------------------------------|-------------------|--------------------------------------|
+| Riley Resident                | `resident`        | `resident@fixhub.test`               |
+| Sky System Admin              | `admin`           | `admin@fixhub.test`                  |
+| Fran Front Desk               | `reception_admin` | `reception@fixhub.test`              |
+| Priya Property Manager        | `triage_officer`  | `triage@fixhub.test`                 |
+| Casey Dispatch Coordinator    | `coordinator`     | `coordinator@fixhub.test`            |
+| Devon Contractor              | `contractor`      | `contractor@fixhub.test`             |
+| Maddie Maintenance Technician | `contractor`      | `maintenance.contractor@fixhub.test` |
+| Indy Independent Contractor   | `contractor`      | `independent.contractor@fixhub.test` |
+
+In normal mode, the app can also seed one bootstrap user when both `FIXHUB_BOOTSTRAP_USER_EMAIL` and `FIXHUB_BOOTSTRAP_USER_PASSWORD` are set. That account logs in with the exact email and password values you provide. If you use the example in this README, the bootstrap login is `ops.admin@example.com` with password `change-me-now`.
+
 ## Local Migrations
 
 Alembic now resolves the database target the same way as app startup:
