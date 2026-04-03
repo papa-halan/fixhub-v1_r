@@ -179,6 +179,7 @@ ROLE_GROUPS_BY_TARGET = {
 class EventSpec:
     message: str
     event_type: EventType
+    target_status: JobStatus | None = None
     reason_code: str | None = None
     responsibility_stage: ResponsibilityStage | None = None
     owner_scope: OwnerScope | None = None
@@ -273,6 +274,7 @@ def append_event(
     actor: User,
     message: str,
     event_type: EventType = EventType.note,
+    target_status: JobStatus | None = None,
     reason_code: str | None = None,
     responsibility_stage: ResponsibilityStage | None = None,
     owner_scope: OwnerScope | None = None,
@@ -287,6 +289,7 @@ def append_event(
         location_id=job.location_id,
         asset_id=job.asset_id,
         event_type=event_type,
+        target_status=target_status,
         message=message,
         reason_code=reason_code,
         responsibility_stage=responsibility_stage or default_stage_for_actor(actor),
@@ -374,6 +377,7 @@ def apply_status_change(
     return EventSpec(
         message=STATUS_EVENT_MESSAGES[target],
         event_type=EVENT_TYPE_BY_STATUS.get(target, EventType.status_change),
+        target_status=target,
         reason_code=reason_code,
         responsibility_stage=stage,
         owner_scope=owner_scope or default_owner_scope(actor, job),

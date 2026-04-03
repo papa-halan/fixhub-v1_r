@@ -94,6 +94,7 @@ def create_job(
         actor=current_user,
         message="Report created",
         event_type=EventType.report_created,
+        target_status=JobStatus.new,
         responsibility_stage=ResponsibilityStage.reception,
     )
     session.commit()
@@ -146,6 +147,7 @@ def build_assignment_events(
                     EventSpec(
                         message=STATUS_EVENT_MESSAGES[fallback_status],
                         event_type=EventType.status_change,
+                        target_status=fallback_status,
                         responsibility_stage=ResponsibilityStage.triage
                         if fallback_status == JobStatus.triaged
                         else ResponsibilityStage.reception,
@@ -168,6 +170,7 @@ def build_assignment_events(
             EventSpec(
                 message=STATUS_EVENT_MESSAGES[JobStatus.assigned],
                 event_type=EventType.status_change,
+                target_status=JobStatus.assigned,
                 responsibility_stage=ResponsibilityStage.triage,
                 owner_scope=current_scope,
             )
@@ -320,6 +323,7 @@ def update_job(
             actor=current_user,
             message=spec.message,
             event_type=spec.event_type,
+            target_status=spec.target_status,
             reason_code=spec.reason_code,
             responsibility_stage=spec.responsibility_stage,
             owner_scope=spec.owner_scope,

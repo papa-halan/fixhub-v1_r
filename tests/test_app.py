@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import uuid
 
 import pytest
@@ -10,6 +11,7 @@ from app.main import create_app
 from app.models import (
     Base,
     ContractorMode,
+    Event,
     Location,
     LocationType,
     Organisation,
@@ -151,6 +153,38 @@ def test_page_requests_redirect_to_login_when_unauthenticated(tmp_path) -> None:
 
     assert response.status_code == 303
     assert response.headers["location"] == "/?next=/resident/report"
+
+
+def test_job_events_are_sorted_by_timestamp_then_id_for_stable_timeline_reads(tmp_path) -> None:
+    app, client = build_client(tmp_path)
+
+    with client:
+        switch_demo_user(client, "resident@fixhub.test")
+        job = create_job(client, location_id=lookup_ids(app)["room_a14_location_id"])
+
+        switch_demo_user(client, "reception@fixhub.test")
+        note_one = client.post(
+            f"/api/jobs/{job['id']}/events",
+            json={"message": "Confirmed resident availability"},
+        )
+        note_two = client.post(
+            f"/api/jobs/{job['id']}/events",
+            json={"message": "Requested plumber attendance window"},
+        )
+        assert note_one.status_code == 201, note_one.text
+        assert note_two.status_code == 201, note_two.text
+
+        shared_created_at = datetime(2026, 4, 4, 0, 0, tzinfo=timezone.utc)
+        with app.state.SessionLocal() as session:
+            events = list(session.scalars(select(Event).where(Event.job_id == uuid.UUID(job["id"]))))
+            for event in events:
+                event.created_at = shared_created_at
+            session.commit()
+
+        events = job_events(client, job["id"])
+
+    returned_ids = [event["id"] for event in events]
+    assert returned_ids == sorted(returned_ids)
 
 
 def test_demo_auth_is_disabled_by_default(tmp_path) -> None:

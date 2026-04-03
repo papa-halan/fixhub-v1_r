@@ -94,7 +94,7 @@ def event_query(job_id: uuid.UUID):
             joinedload(Event.location_record),
             joinedload(Event.asset),
         )
-        .order_by(Event.created_at.asc())
+        .order_by(Event.created_at.asc(), Event.id.asc())
     )
 
 
@@ -277,6 +277,7 @@ def serialize_event(event: Event) -> dict[str, object]:
         "organisation_name": organisation_name(event),
         "actor_label": actor_label(event),
         "event_type": event.event_type.value,
+        "target_status": event.target_status.value if event.target_status else None,
         "message": event.message,
         "reason_code": event.reason_code,
         "responsibility_stage": event.responsibility_stage.value if event.responsibility_stage else None,
