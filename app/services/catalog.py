@@ -10,17 +10,12 @@ from app.schema import AssetOption, LocationOption
 REPORTABLE_LOCATION_TYPES = (LocationType.space, LocationType.unit)
 
 
-def find_or_create_asset(session: Session, *, location: Location, name: str) -> Asset:
-    asset = session.scalar(
+def find_asset_by_name(session: Session, *, location: Location, name: str) -> Asset | None:
+    return session.scalar(
         select(Asset)
         .where(Asset.location_id == location.id, Asset.name == name)
         .limit(1)
     )
-    if asset is None:
-        asset = Asset(location_id=location.id, name=name)
-        session.add(asset)
-        session.flush()
-    return asset
 
 
 def build_location_asset_catalog(session: Session, *, user: User) -> list[dict[str, object]]:

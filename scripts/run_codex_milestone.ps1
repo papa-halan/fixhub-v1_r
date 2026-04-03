@@ -184,7 +184,7 @@ function Check-AlembicSingleHead {
 $agents = @(
     @{
         Name = "agent-01-schema-enforcer"
-        Prompt = "agents/01_schema_enforcer.md"
+        Prompt = "agents/01_foundation.md"
         Allowed = @(
             "app/models/event.py",
             "app/schema/event.py",
@@ -200,7 +200,7 @@ $agents = @(
     },
     @{
         Name = "agent-02-state-deriver"
-        Prompt = "agents/02_state_deriver.md"
+        Prompt = "agents/02_workflow_truth.md"
         Allowed = @(
             "app/services/projections.py",
             "app/services/__init__.py",
@@ -213,7 +213,7 @@ $agents = @(
     },
     @{
         Name = "agent-03-event-builder"
-        Prompt = "agents/03_event_builder.md"
+        Prompt = "agents/03_pilot_alignment.md"
         Allowed = @(
             "app/services/workflow.py",
             "app/services/__init__.py",
@@ -228,7 +228,7 @@ $agents = @(
     },
     @{
         Name = "agent-04-test-guard"
-        Prompt = "agents/04_test_guard.md"
+        Prompt = "agents/04_repo_correction.md"
         Allowed = @(
             "tests/test_event_projection.py",
             "tests/test_app.py",
@@ -254,10 +254,10 @@ $allowedDirtyAtStart = @()
 if ($AllowDirtyPromptFilesOnly) {
     $allowedDirtyAtStart = @(
         "spec/core.md",
-        "agents/01_schema_enforcer.md",
-        "agents/02_state_deriver.md",
-        "agents/03_event_builder.md",
-        "agents/04_test_guard.md",
+        "agents/01_foundation.md",
+        "agents/02_workflow_truth.md",
+        "agents/03_pilot_alignment.md",
+        "agents/04_repo_correction.md",
         "scripts/run_codex_milestone.ps1"
     )
 }

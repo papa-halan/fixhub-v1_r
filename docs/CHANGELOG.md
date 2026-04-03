@@ -65,3 +65,10 @@
 ### Notes
 - this run is documentation-only; no application code was changed
 - the new handoff doc is intended to let a fresh chat continue with implementation planning or execution without replaying the entire prior conversation
+# Changelog
+
+## 2026-04-04
+
+- stopped creating new `assets` from resident free-text report intake
+- made asset selection optional and restricted asset linkage to known location assets
+- updated README workflow language to reflect optional asset capture instead of implied structured certainty

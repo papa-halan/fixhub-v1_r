@@ -43,8 +43,9 @@ from app.services import (
     assignee_label,
     assignee_scope,
     fallback_status_for_unassigned,
-    find_or_create_asset,
+    find_asset_by_name,
     job_has_assignee,
+    sync_job_status_from_events,
 )
 
 
@@ -73,8 +74,15 @@ def create_job(
         or not is_reportable_location(location)
     ):
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Choose a valid location")
-    asset_name = clean_text(payload.asset_name or payload.title, "asset_name")
-    asset = find_or_create_asset(session, location=location, name=asset_name)
+    asset = None
+    if payload.asset_name is not None:
+        asset_name = clean_text(payload.asset_name, "asset_name")
+        asset = find_asset_by_name(session, location=location, name=asset_name)
+        if asset is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="Choose a known asset for that location or leave asset_name blank",
+            )
     job = Job(
         title=clean_text(payload.title, "title"),
         description=clean_text(payload.description, "description"),
@@ -82,7 +90,7 @@ def create_job(
         location_snapshot=location.name,
         location_detail_text=payload.location_detail_text,
         location_id=location.id,
-        asset_id=asset.id,
+        asset_id=asset.id if asset is not None else None,
         status=JobStatus.new,
         created_by=current_user.id,
     )
@@ -97,6 +105,7 @@ def create_job(
         target_status=JobStatus.new,
         responsibility_stage=ResponsibilityStage.reception,
     )
+    sync_job_status_from_events(job)
     session.commit()
     return serialize_job(visible_job(session, current_user, job.id))
 
@@ -142,7 +151,6 @@ def build_assignment_events(
         if not explicit_status_change:
             fallback_status = fallback_status_for_unassigned(job)
             if job.status != fallback_status:
-                job.status = fallback_status
                 events.append(
                     EventSpec(
                         message=STATUS_EVENT_MESSAGES[fallback_status],
@@ -165,7 +173,6 @@ def build_assignment_events(
         )
     )
     if not explicit_status_change and job.status == JobStatus.new:
-        job.status = JobStatus.assigned
         events.append(
             EventSpec(
                 message=STATUS_EVENT_MESSAGES[JobStatus.assigned],
@@ -329,6 +336,8 @@ def update_job(
             owner_scope=spec.owner_scope,
             responsibility_owner=spec.responsibility_owner,
         )
+    if messages:
+        sync_job_status_from_events(job)
 
     session.commit()
     return serialize_job(visible_job(session, current_user, job.id))

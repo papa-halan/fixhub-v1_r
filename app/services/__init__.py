@@ -1,6 +1,6 @@
 from app.services.auth import AuthenticationError, authenticate_user
 from app.services.bootstrap import ensure_bootstrap_user
-from app.services.catalog import build_location_asset_catalog, find_or_create_asset
+from app.services.catalog import build_location_asset_catalog, find_asset_by_name
 from app.services.demo import ensure_demo_data, is_demo_user_email, list_demo_users
 from app.services.passwords import hash_password, verify_password
 from app.services.projections import derive_job_status_from_events, sync_job_status_from_events
@@ -61,7 +61,7 @@ __all__ = [
     "ensure_demo_data",
     "ensure_bootstrap_user",
     "fallback_status_for_unassigned",
-    "find_or_create_asset",
+    "find_asset_by_name",
     "hash_password",
     "is_demo_user_email",
     "job_has_assignee",

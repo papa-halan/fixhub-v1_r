@@ -34,7 +34,7 @@
     </label>
     <label>
       Asset
-      <input type="text" name="asset_name" list="asset-options" placeholder="Sink" required {% if not location_catalog %}disabled{% endif %}>
+      <input type="text" name="asset_name" list="asset-options" placeholder="Optional known asset, for example Sink" {% if not location_catalog %}disabled{% endif %}>
       <datalist id="asset-options"></datalist>
     </label>
     <label>
@@ -46,7 +46,7 @@
       <textarea name="description" placeholder="Water is dripping steadily under the sink." required></textarea>
     </label>
     {% if location_catalog %}
-    <p class="muted form-helper">Examples: sink, tap, wardrobe hinge, shower door, ceiling light.</p>
+    <p class="muted form-helper">Leave asset blank if you only know the location. If you enter one, it should match the location's known asset list.</p>
     {% else %}
     <p class="feedback">No reportable locations are configured for your organisation yet.</p>
     {% endif %}

@@ -10,6 +10,7 @@ The repository is currently stabilized through Phase 0.5:
 - Auth uses password login plus signed cookie sessions.
 - Demo shortcuts are available only when `FIXHUB_DEMO_MODE=1`.
 - Reports use a structured `location_id`; free text stays descriptive-only in `location_detail_text`.
+- Asset linkage is optional and only attaches to pre-existing location assets; report intake does not invent new structured assets from free text.
 - Organisation scoping is enforced for residents and operations users.
 
 Phase 1 is still deferred. This repo does not yet implement the larger request -> work-order -> visit/dispatch split.
@@ -115,11 +116,12 @@ Reportable operational locations are managed child `space` or `unit` rows. Root-
 ## Current Workflow
 
 1. A resident signs in and submits a report against a managed location in their organisation.
-2. Front desk or operations staff add clarifying notes when needed.
-3. A dispatch coordinator assigns the work to a contractor organisation or a direct contractor.
-4. A property manager triages and schedules the job.
-5. The assigned contractor or technician moves the work through execution states.
-6. Everyone reads the same shared timeline with stable location and asset context.
+2. The report may reference a known asset at that location, but asset capture is optional.
+3. Front desk or operations staff add clarifying notes when needed.
+4. A dispatch coordinator assigns the work to a contractor organisation or a direct contractor.
+5. A property manager triages and schedules the job.
+6. The assigned contractor or technician moves the work through execution states.
+7. Everyone reads the same shared timeline with stable location context and optional asset context.
 
 Supported job states:
 

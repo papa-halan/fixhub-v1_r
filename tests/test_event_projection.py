@@ -4,8 +4,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import uuid
 
-from app.models import JobStatus
-from app.services import derive_job_status_from_events, sync_job_status_from_events
+from app.models import JobStatus, UserRole
+from app.services import apply_status_change, derive_job_status_from_events, sync_job_status_from_events
 
 
 @dataclass
@@ -21,6 +21,14 @@ class StubEvent:
 class StubJob:
     status: JobStatus
     events: list[StubEvent]
+    assigned_org_id: uuid.UUID | None = None
+    assigned_contractor_user_id: uuid.UUID | None = None
+
+
+@dataclass
+class StubActor:
+    role: UserRole
+    organisation_id: uuid.UUID | None = None
 
 
 def test_derive_job_status_from_events_falls_back_to_new_when_all_target_status_values_are_null() -> None:
@@ -96,3 +104,14 @@ def test_sync_job_status_from_events_updates_job_status_from_derived_projection(
 
     assert sync_job_status_from_events(job) == JobStatus.triaged
     assert job.status == JobStatus.triaged
+
+
+def test_apply_status_change_returns_event_spec_without_mutating_job_status() -> None:
+    actor = StubActor(role=UserRole.triage_officer)
+    job = StubJob(status=JobStatus.assigned, events=[])
+
+    event = apply_status_change(job, JobStatus.triaged, actor)
+
+    assert event is not None
+    assert event.target_status == JobStatus.triaged
+    assert job.status == JobStatus.assigned

@@ -433,6 +433,7 @@ def test_resident_report_page_lists_reportable_locations_only(tmp_path) -> None:
     assert "Block B Laundry" in report_page.text
     assert "Callaghan Campus" not in report_page.text
     assert "Sink" in report_page.text
+    assert "Leave asset blank if you only know the location." in report_page.text
 
 
 def test_legacy_placeholder_locations_are_hidden_from_catalog_and_rejected(tmp_path) -> None:
@@ -517,6 +518,41 @@ def test_report_creation_rejects_non_reportable_and_cross_org_location_usage(tmp
     assert invalid_type_response.json() == {"detail": "Choose a valid location"}
     assert cross_org_response.status_code == 422
     assert cross_org_response.json() == {"detail": "Choose a valid location"}
+
+
+def test_report_creation_keeps_asset_optional_and_rejects_unknown_asset_names(tmp_path) -> None:
+    app, client = build_client(tmp_path)
+
+    with client:
+        ids = lookup_ids(app)
+        login_as(client, "resident@fixhub.test")
+
+        no_asset_response = client.post(
+            "/api/jobs",
+            json={
+                "title": "Ceiling stain spreading",
+                "description": "Water mark is spreading above the desk.",
+                "location_id": str(ids["room_a14_location_id"]),
+                "asset_name": None,
+            },
+        )
+        unknown_asset_response = client.post(
+            "/api/jobs",
+            json={
+                "title": "Unknown fixture issue",
+                "description": "Resident cannot identify the affected fixture.",
+                "location_id": str(ids["room_a14_location_id"]),
+                "asset_name": "Mystery Pipe",
+            },
+        )
+
+    assert no_asset_response.status_code == 201
+    assert no_asset_response.json()["asset_id"] is None
+    assert no_asset_response.json()["asset_name"] is None
+    assert unknown_asset_response.status_code == 422
+    assert unknown_asset_response.json() == {
+        "detail": "Choose a known asset for that location or leave asset_name blank"
+    }
 
 
 def test_same_org_access_rules_block_other_org_admins_from_viewing_jobs(tmp_path) -> None:

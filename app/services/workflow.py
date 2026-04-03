@@ -373,7 +373,6 @@ def apply_status_change(
             detail=f"responsibility_stage is required when moving a job to {target.value}",
         )
 
-    job.status = target
     return EventSpec(
         message=STATUS_EVENT_MESSAGES[target],
         event_type=EVENT_TYPE_BY_STATUS.get(target, EventType.status_change),

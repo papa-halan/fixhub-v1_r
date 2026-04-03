@@ -78,3 +78,14 @@ Date: `2026-03-22 17:15:11 +11:00`
 - richer routing-decision persistence
 - public reporting, councils/homeowners, GIS/maps, and ownership verification flows
 - full RBAC, invites, password reset, or enterprise auth
+# Student Living Schema Assessment
+
+## 2026-04-04 adjustment
+
+The repo now treats `assets` as optional catalog data rather than something that can be truthfully derived from arbitrary resident text at report time.
+
+This is a better fit for the current pilot because:
+
+- resident reports reliably know the location more often than the exact maintainable asset
+- free-text asset creation inflated the apparent quality of structured data
+- optional asset linkage preserves the credible pilot path without pretending the asset register is authoritative yet
