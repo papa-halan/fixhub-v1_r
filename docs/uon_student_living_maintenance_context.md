@@ -1,6 +1,6 @@
 # Research Log: UoN Student Living Maintenance Context
 
-Last updated: `2026-03-22 19:11:47 +11:00`
+Last updated: `2026-04-04 00:59:35 +11:00`
 
 ## Document Metadata
 
@@ -400,3 +400,140 @@ This suggests FixHub should keep the current stage model for now, but extend the
 - public sources still do not expose the exact business-hours owner of liability decisions or whether that sits solely with Student Living Services
 - public sources still do not expose an urgency / SLA matrix for maintenance categories
 - public sources still do not document the exact record passed from Security or AHDOs into the daytime Services workflow
+
+## Run Entry: `2026-04-04 00:59:35 +11:00`
+
+### Research scope
+
+Re-check the current public UoN Student Living source set, tighten the real actor/handoff model, and identify where the resident-facing Student Living process appears to join a broader university maintenance fulfilment network.
+
+### Additional source set used in this run
+
+- [Guides and resources](https://www.newcastle.edu.au/campus-life/accommodation/on-campus-accommodation/resources)
+- [About us - Student Living team structure and contact model](https://www.newcastle.edu.au/campus-life/accommodation/configuration/?a=228835)
+- [Security](https://www.newcastle.edu.au/campus-life/accommodation/on-campus-accommodation/why-choose-us/security)
+- [Inclusions - cleaning services and equipment](https://www.newcastle.edu.au/campus-life/accommodation/on-campus-accommodation/why-choose-us/facilities-and-inclusions)
+- [2026 Callaghan New Resident Welcome Guide](https://www.newcastle.edu.au/__data/assets/pdf_file/0005/1104719/FINAL_2026-Welcome-Guide-New-Callaghan.pdf)
+- [2026 Occupancy Licence Agreement - Terms and Conditions](https://www.newcastle.edu.au/__data/assets/pdf_file/0003/1082892/FINAL_2026-Student-OLA-Terms-and-Conditions.pdf)
+- [2026 Student OLA - Schedule of Charges - Annexure 2](https://www.newcastle.edu.au/__data/assets/pdf_file/0005/1082894/FINAL_2026-Student-OLA-Schedule-of-Charges-Annexure-2.pdf)
+- [Appeal Form](https://www.newcastle.edu.au/__data/assets/pdf_file/0011/795530/appeal-form.pdf)
+- [Current staff maintenance contact page](https://www.newcastle.edu.au/current-staff/working-here/our-work-environment/buildings-and-spaces/maintenance-and-cleaning/contact-us)
+
+### What this run clarified
+
+The current source freshness is still strong enough to treat this as the live 2026 operating model. The resources hub currently lists the 2026 Community Standards and OLA documents as published on 9-11 September 2025 and the Callaghan welcome guide as published on 13 January 2026. That matters because the workflow below is still grounded in the active contract pack and current-cycle resident guide rather than an older archive set.
+
+The named daytime process owner is now clearer than before. The `About us` page says `Student Living Services` manages the accommodation precincts and helps with practical on-campus matters including `maintenance requests`, with office-hours contact from West Residence Ground Floor, Monday to Friday, 9:30am to 4:30pm. This is stronger than a generic `reception` label. For FixHub, the best current reading is that `Student Living Services` is the business-hours service desk and operational owner for resident-facing maintenance intake and continuity.
+
+The after-hours model is now better understood as a two-tier support layer rather than a single actor. The `About us` and `Security` pages show that AHDOs provide after-hours resident support but only during defined windows, while Campus Security remains on call 24/7. Combined with clause 22 of the 2026 OLA, this means urgent maintenance or damage reports outside office hours can enter through either AHDOs or Security depending on time and situation. That is important for FixHub because `after_hours` is not one generic actor; it is at least:
+
+- `ahdo` for resident-facing out-of-hours support during rostered coverage
+- `security` for 24/7 emergency/safety cover and the fallback path outside AHDO hours
+
+The resident intake flow itself remains stable and concrete. The welcome guide still shows the exact portal workflow:
+
+1. resident logs into the Student Living Portal
+2. opens `Maintenance and Cleaning`
+3. selects `New Job`
+4. enters `where`, `category`, `item`, and notes
+5. Student Living receives the request
+6. Student Living organises external contractors to inspect when needed
+7. minor items can be fulfilled through a pickup path at Student Living Reception
+
+The same guide also keeps the inspection-origin path alive: disputed room-inventory items are reviewed by the `Facilities Team`, which decides repair, replacement, or note-only treatment. That means the live process still supports at least two clearly evidenced daytime assessment actors:
+
+- `student_living_services` as the office-hours service owner
+- `facilities_team` as a condition-review/assessment participant for inventory-origin work
+
+The fulfilment layer is also sharper after this run. The 2026 OLA states that `the University or its contractors will undertake all repairs and alterations`. This is stronger than saying only that Student Living coordinates a vendor. It suggests the repair owner can be either an internal university fulfilment function or an external contractor, while Student Living remains the resident-facing operating surface. The current staff maintenance page strengthens this, though only indirectly: broader university maintenance is reported through `Maximo`, with Infrastructure and Facilities Services and separate emergency maintenance contacts. This does not directly prove Student Living residents are routed into Maximo, but it is the strongest public sign that some Student Living work may pass from the resident-facing Student Living workflow into a separate campus maintenance system or team. This is an inference from the sources, not a directly confirmed Student Living process step.
+
+The access/entry model remains a major accountability signal. The OLA still says:
+
+- reasonable notice is provided where possible for routine room checks
+- no notice is required for emergency/welfare/safety concerns
+- no notice is required where room entry is needed to respond to a maintenance request
+- notices may be given by common-area notice board or by email
+
+This means FixHub should keep treating access handling as first-class workflow evidence rather than as a free-text side note. The real operating question is often not `did the resident approve?` but `what authority/notice basis applied to this entry?`
+
+The cleaning and common-space side of the process is also still active and operationally relevant. The current `Inclusions` page says shared spaces such as kitchens, bathrooms, common rooms, and study spaces are actively serviced: housekeeping for units and studios is weekly, while common rooms and study spaces are checked daily and cleaned as needed. That reinforces an earlier conclusion with stronger current-page evidence: non-resident-generated work is normal in Student Living. The event spine should continue to support inspection/housekeeping-origin jobs, not just resident-submitted faults.
+
+The accountability tail of the workflow is now even more explicit as a live operating pattern. The resources hub still publishes the `Appeal Form`, separate `Door Breach Appeal Evidence/Documentation Examples`, and the 2026 `Schedule of Charges`. The 2026 OLA says charge notices are issued via email when payment is required and must be paid through the Student Living Portal within 14 days of receipt. The appeal form says appeals must be submitted within 14 days of the charge or fee notification and that supporting documentation is required. This confirms that the real workflow continues beyond physical repair into evidence-backed financial/accountability resolution.
+
+### Refined end-to-end workflow model
+
+#### Best current process interpretation
+
+1. An issue is identified through one of the current live origins:
+- resident portal self-service
+- office-hours staff-mediated reporting
+- check-in inventory dispute reviewed by Facilities Team
+- housekeeping/common-space observation
+- AHDO or Security after-hours report
+2. `Student Living Services` becomes the daytime operating owner of the case, even if the initial report came through another actor.
+3. The case is assessed for:
+- whether it is note-only, repair, replacement, pickup fulfilment, cleaning/compliance follow-up, or emergency response
+- whether responsibility looks like fair wear and tear, resident-caused, or shared/common-area liability
+- whether fulfilment needs an internal university team, a maintenance team, or external contractors
+4. Access authority / notice mode is determined and recorded.
+5. Fulfilment occurs through an internal or contractor execution path.
+6. The case closes either as ordinary maintenance completion or continues into charge notice, payment, appeal, and final resolution.
+
+#### Actor map after this run
+
+| Actor | Strongest current evidence | Best current workflow reading | FixHub implication |
+| --- | --- | --- | --- |
+| Resident | portal `New Job`, OLA reporting duty, appeal form | reporter, access-context holder, liable or non-liable party, appeal submitter | keep resident-visible timeline and accountability evidence |
+| Student Living Services | `About us` page, welcome guide, resources contact model | office-hours service desk and named operational owner for resident-facing maintenance continuity | treat as first-class business owner, not just a generic reception role |
+| Facilities Team | welcome guide inventory-review path | assessment/review actor for check-in condition disputes and repair-vs-note decisions | support `inventory_assessment` origin and event typing |
+| Student Living Support | `About us` page | welfare/discipline/context actor, not default maintenance owner | support-note or escalation actor only |
+| Residential Mentors | `About us` page | peer support and wayfinding actor, not workflow owner | context actor, not assignee |
+| AHDOs | `About us`, security page, OLA clause 22 | rostered after-hours intake/support actor | explicit after-hours intake/handoff events |
+| Campus Security | security page, OLA clause 22 | 24/7 emergency and fallback after-hours intake actor | distinct from AHDO; keep explicit 24/7 escalation actor |
+| University maintenance / facilities function | OLA says University or its contractors undertake repairs; current staff page shows Maximo + Infrastructure and Facilities Services | likely backstage fulfilment network for some jobs | model as an inferred downstream fulfilment owner, not yet a confirmed resident-facing role |
+| External contractors | welcome guide, OLA | inspection and repair execution under University coordination | keep explicit execution actors on the spine |
+
+### Event-spine implications added in this run
+
+The current stage model still holds:
+
+- `reception`: resident portal intake, office-hours staff-created reports, after-hours handoff receipt
+- `triage`: Student Living Services assessment of type, urgency, responsibility, and fulfilment path
+- `coordination`: dispatch to contractor/university fulfilment and access handling
+- `execution`: inspection, pickup-ready fulfilment, repair, no-access, blocked, or completion
+
+The clearer additions now are:
+
+1. explicit `service_owner`
+   Suggested values:
+   `student_living_services`, `security_after_hours`, `ahdo_after_hours`
+   Why:
+   the resident-facing owner changes over time, and the business-hours owner matters for accountability.
+2. explicit `fulfilment_route`
+   Suggested values:
+   `student_living_maintenance_team`, `external_contractor`, `university_facilities_inferred`
+   Why:
+   resident-facing ownership and fulfilment ownership are not always the same actor.
+3. explicit `entry_basis`
+   Suggested values:
+   `routine_notice`, `maintenance_request_no_notice`, `emergency_no_notice`, `common_area_open_access`
+   Why:
+   UoN's process relies on authority/notice rules, not only resident appointment consent.
+4. explicit `after_hours_handoff`
+   Suggested values:
+   `ahdo_to_services`, `security_to_services`
+   Why:
+   the after-hours path is operationally real and the daytime continuity owner appears different.
+5. explicit post-work accountability events
+   Suggested values:
+   `charge_notice_issued`, `charge_breakdown_requested`, `appeal_submitted`, `appeal_decided`, `charge_resolved`
+   Why:
+   UoN's live process clearly includes evidence-backed charge and appeal handling after the repair outcome.
+
+### Best next research targets
+
+1. confirm whether Student Living Services staff manually proxy jobs into a separate university maintenance platform or whether contractor coordination is managed entirely within Student Living tooling
+2. find any current resident-facing evidence of execution-stage status updates beyond intake and charge notices
+3. find whether any urgency/severity matrix exists for resident maintenance categories
+4. confirm the business-hours owner of liability decisions and appeal review
+5. confirm whether access booking windows exist in practice or whether entry mostly follows the OLA notice/authority rules alone
