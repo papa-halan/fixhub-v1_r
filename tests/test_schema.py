@@ -6,8 +6,8 @@ import uuid
 import pytest
 from pydantic import ValidationError
 
-from app.models import Job, JobStatus, Location, LocationType, User
-from app.schema import EventCreate, JobCreate, JobRead, LocationOption, LocationRead, LoginRequest
+from app.models import EventType, Job, JobStatus, Location, LocationType, User
+from app.schema import EventCreate, EventRead, JobCreate, JobRead, LocationOption, LocationRead, LoginRequest
 from app.services.passwords import hash_password, verify_password
 
 
@@ -51,6 +51,37 @@ def test_event_create_is_note_only_and_rejects_extra_fields() -> None:
 
     with pytest.raises(ValidationError):
         EventCreate(message="Forged completion", event_type="completion")
+
+    with pytest.raises(ValidationError):
+        EventCreate(message="Forged completion", target_status=JobStatus.completed)
+
+
+def test_event_read_includes_optional_target_status() -> None:
+    event = EventRead(
+        id=uuid.uuid4(),
+        job_id=uuid.uuid4(),
+        location_id=None,
+        location=None,
+        asset_id=None,
+        asset_name=None,
+        actor_user_id=uuid.uuid4(),
+        actor_org_id=None,
+        actor_name="Riley Resident",
+        actor_role=None,
+        actor_role_label=None,
+        organisation_name=None,
+        actor_label="Riley Resident",
+        event_type=EventType.completion,
+        target_status=JobStatus.completed,
+        message="Marked job completed",
+        reason_code=None,
+        responsibility_stage=None,
+        owner_scope=None,
+        responsibility_owner=None,
+        created_at=datetime.now(timezone.utc),
+    )
+
+    assert event.target_status == JobStatus.completed
 
 
 def test_login_request_trims_credentials() -> None:

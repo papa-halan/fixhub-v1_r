@@ -5,7 +5,7 @@ from datetime import datetime
 
 from pydantic import ValidationInfo, field_validator
 
-from app.models import EventType, OwnerScope, ResponsibilityOwner, ResponsibilityStage, UserRole
+from app.models import EventType, JobStatus, OwnerScope, ResponsibilityOwner, ResponsibilityStage, UserRole
 from app.schema.base import SchemaModel, strip_non_blank
 
 
@@ -33,6 +33,7 @@ class EventRead(SchemaModel):
     organisation_name: str | None = None
     actor_label: str
     event_type: EventType
+    target_status: JobStatus | None = None
     message: str
     reason_code: str | None = None
     responsibility_stage: ResponsibilityStage | None = None

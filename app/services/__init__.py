@@ -3,6 +3,7 @@ from app.services.bootstrap import ensure_bootstrap_user
 from app.services.catalog import build_location_asset_catalog, find_or_create_asset
 from app.services.demo import ensure_demo_data, is_demo_user_email, list_demo_users
 from app.services.passwords import hash_password, verify_password
+from app.services.projections import derive_job_status_from_events, sync_job_status_from_events
 from app.services.workflow import (
     ASSIGNEE_REQUIRED_STATUSES,
     ASSIGNMENT_ROLES,
@@ -56,6 +57,7 @@ __all__ = [
     "default_owner_scope",
     "default_responsibility_owner",
     "default_stage_for_actor",
+    "derive_job_status_from_events",
     "ensure_demo_data",
     "ensure_bootstrap_user",
     "fallback_status_for_unassigned",
@@ -67,6 +69,7 @@ __all__ = [
     "require_status_permission",
     "role_label",
     "status_label",
+    "sync_job_status_from_events",
     "touch_job",
     "user_role_label",
     "validate_assignee_required",

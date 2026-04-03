@@ -1,113 +1,91 @@
-# FixHub Core Contract — Phase 1 Event Spine
+# FixHub Core Objective and Guardrails
 
-Status: active  
-Scope: bounded overnight refactor  
-Baseline: Phase 0.5 repo at Alembic head `20260321_0008`
+FixHub is being built toward one goal:
 
-## Objective
+A coordination platform for civil works that becomes the shared source of truth for what is happening across a physical job.
 
-Move lifecycle state from implicit mutable job state to explicit event-backed projection, without redesigning the whole product.
+The long-term objective is not to build a generic maintenance app, ticketing tool, or internal asset management system. The objective is to build an external coordination layer for physical infrastructure work.
 
-This phase is intentionally narrow:
-- make lifecycle transitions event-backed
-- keep the current `Job` object
-- preserve existing auth, demo mode, structured location flow, and current UI surfaces
+## Product thesis
 
-## Out of scope for this phase
+Every civil job involves multiple actors, partial information, weak visibility, and coordination failures across organisational boundaries.
 
-Do not introduce any of the following tonight:
-- `request`, `work_order`, `visit`, `dispatch`, or other new top-level lifecycle tables
-- UI redesigns or template rewrites
-- a new RBAC system
-- visibility filtering or resident/internal timeline separation
-- GIS/maps/public reporting flows
-- external integrations
-- removal of current assignment columns from `jobs`
-- auth/bootstrap/demo-mode redesign
+FixHub should solve this by making each job a truthful, auditable, structured timeline of actions tied to a real location and visible to the right participants.
 
-## Canonical rules
+The product should evolve toward:
+- shared truth across residents, contractors, staff, and organisations
+- accountability for who did what and when
+- reduced ambiguity and repeated contact
+- a persistent operational record that can later support governance, analytics, and broader infrastructure coordination
 
-1. `events` is the canonical history/audit record.
-2. Every lifecycle change must produce exactly one event row with a non-null `target_status`.
-3. `jobs.status` remains temporarily, but only as a cached projection for compatibility, filters, sorting, and existing response shapes.
-4. The only authority for lifecycle state is `derive_job_status_from_events(events)`.
-5. No service or route may silently change lifecycle state without emitting an event.
-6. Manual note creation remains note-only. Clients must not be able to choose `event_type` or `target_status`.
-7. `location_id` remains the canonical physical location reference. `location_detail_text` remains descriptive-only.
-8. `Job` remains the only operational record in this phase.
-9. Assignment columns may remain on `jobs` in this phase, but every assignment change must emit an `assignment` event. Assignment events are audit events, not lifecycle state, unless the workflow also emits a separate lifecycle event.
-10. Alembic remains the schema authority. Do not reintroduce runtime `Base.metadata.create_all()`.
+## First practical wedge
 
-## Event contract
+The immediate wedge is recurring maintenance coordination in a constrained environment such as university residences.
 
-Add this field to `events`:
+That wedge is only a starting environment. The broader objective remains a coordination layer for civil works in general.
 
-- `target_status: nullable JobStatus`
+## What matters most
 
-Rules:
-- `target_status` is non-null for lifecycle-changing events.
-- `target_status` is null for manual notes.
-- `target_status` is null for pure assignment audit events.
-- `report_created` must set `target_status = JobStatus.new`.
-- `status_change` must set `target_status` to the moved-to status.
-- `schedule` must set `target_status = JobStatus.scheduled`.
-- `completion` must set `target_status = JobStatus.completed`.
-- `follow_up` must set `target_status = JobStatus.follow_up_scheduled`.
-- `escalation` must set `target_status = JobStatus.escalated`.
+When making decisions, optimise for:
+1. truthfulness of the operational record
+2. clarity of actor and location relationships
+3. low-friction updates from real participants
+4. trustworthy progress visibility
+5. future expansion into broader civil coordination without requiring the first version to model everything
 
-## Projection rules
+## Architectural direction
 
-Implement a pure helper:
+The platform should move toward:
+- event-backed job history
+- structured location references
+- clear actor roles
+- lifecycle state derived from meaningful actions
+- minimal ambiguity between what happened and what the system claims happened
 
-`derive_job_status_from_events(events) -> JobStatus`
+## Development rule
 
-Projection behavior:
-1. Order events by `(created_at, id)` ascending.
-2. Ignore events where `target_status is null`.
-3. The last non-null `target_status` wins.
-4. If no event has a non-null `target_status`, return `JobStatus.new`.
+Prefer decisions that make FixHub more like a real coordination layer and less like a generic CRUD app.
 
-## Cache rules
+When forced to choose, prefer:
+- truth over convenience
+- coherence over feature count
+- realistic workflows over demo features
+- a smaller but more correct wedge over a broader but less truthful system
 
-- `jobs.status` may continue to be returned by existing APIs and used in SQL filters.
-- After any write path that appends events, code must recompute and persist `jobs.status` from the event stream.
-- No other code may set `jobs.status` directly.
-- Compatibility cache sync is allowed, but it must be derived from events, never treated as the source of truth.
+## Allowed scope for autonomous work
 
-## Backfill rules
+Autonomous changes may:
+- refactor existing models, services, schemas, routes, and tests
+- add helpers, migrations, and focused modules
+- remove clearly misleading demo or legacy code
+- simplify lifecycle logic
+- improve event-backed coordination behavior
+- improve pilot realism
 
-The migration that adds `events.target_status` must backfill deterministic values for existing rows using only stable information already in the data.
+Autonomous changes should usually avoid:
+- introducing many new top-level concepts at once
+- broad UI redesigns
+- speculative abstractions for future markets
+- replacing the entire architecture in one pass
+- deleting working auth or seed flows unless they clearly obstruct the real product
 
-Backfill mapping:
-- `report_created` -> `new`
-- `schedule` -> `scheduled`
-- `completion` -> `completed`
-- `follow_up` -> `follow_up_scheduled`
-- `escalation` -> `escalated`
-- `status_change` -> reverse-map the existing `STATUS_EVENT_MESSAGES`
-- ambiguous legacy `assignment` rows -> `null`
-- `note` rows -> `null`
+## Hard guardrails
 
-Do not invent statuses for ambiguous historical rows.
+Do not:
+- convert the product into a generic asset management system
+- turn the system into a generic kanban/task board
+- weaken structured location handling in favor of free text
+- treat mutable status as more authoritative than recorded operational history
+- expand scope just because a broader platform might eventually need it
+- preserve architectural incoherence simply to avoid refactoring
 
-## Current repo-specific guidance
+## Immediate objective
 
-The current repo already has:
-- `app/services/workflow.py` with `append_event`, `apply_status_change`, `EventSpec`, and `STATUS_EVENT_MESSAGES`
-- `app/api/jobs.py` as the main write path for report creation, assignment changes, and lifecycle updates
-- `app/api/deps.py` serializing `job.status` and event payloads
-- `tests/test_app.py`, `tests/test_schema.py`, and `tests/test_migrations.py` covering major behavior
+Bring the current codebase closer to a truthful FixHub core and a credible first pilot.
 
-Work with those structures. Do not redesign the repository.
-
-## Acceptance criteria
-
-A change set is acceptable only if all of the following are true:
-- one new Alembic migration is added after `20260321_0008`
-- `Event` and `EventRead` expose `target_status`
-- a pure lifecycle projection helper exists
-- report creation emits `target_status = new`
-- every lifecycle transition emits a non-null `target_status`
-- manual note creation still produces note-only events with `target_status = null`
-- `jobs.status` stays synchronized with the derived projection
-- existing auth, demo mode, structured location behavior, and current UI routes remain intact
+A change is good if it moves the repo closer to:
+- a usable coordination layer for a constrained real environment
+- a truthful job timeline
+- clearer role and location relationships
+- lower ambiguity in what happened and who did it
+- a system that can later expand into broader civil works coordination

@@ -8,7 +8,7 @@ from sqlalchemy import Enum, ForeignKey, Index, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, created_timestamp, uuid_pk
-from app.models.enums import EventType, OwnerScope, ResponsibilityOwner, ResponsibilityStage
+from app.models.enums import EventType, JobStatus, OwnerScope, ResponsibilityOwner, ResponsibilityStage
 
 if TYPE_CHECKING:
     from app.models.asset import Asset
@@ -56,6 +56,15 @@ class Event(Base):
         nullable=False,
         default=EventType.note,
         server_default=EventType.note.value,
+    )
+    target_status: Mapped[JobStatus | None] = mapped_column(
+        Enum(
+            JobStatus,
+            name="job_status_enum",
+            native_enum=False,
+            validate_strings=True,
+        ),
+        nullable=True,
     )
     message: Mapped[str] = mapped_column(Text, nullable=False)
     reason_code: Mapped[str | None] = mapped_column(Text, nullable=True)

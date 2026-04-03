@@ -581,6 +581,16 @@ def test_resident_triage_schedule_execute_flow_records_structured_metadata(tmp_p
     assert events[1]["event_type"] == "assignment"
     assert events[2]["event_type"] == "status_change"
     assert events[6]["event_type"] == "completion"
+    assert [event["target_status"] for event in events] == [
+        "new",
+        None,
+        "assigned",
+        "triaged",
+        "scheduled",
+        "in_progress",
+        "completed",
+    ]
+    assert final_job.json()["status"] == events[-1]["target_status"]
 
 
 def test_direct_contractor_assignment_supports_independent_dispatch_and_visibility(tmp_path) -> None:
@@ -663,6 +673,11 @@ def test_clearing_assignment_moves_active_job_back_to_triaged(tmp_path) -> None:
     assert cleared_job["assigned_org_id"] is None
     assert "Assignment cleared" in [event["message"] for event in events]
     assert "Marked job triaged" in [event["message"] for event in events]
+    assert next(event for event in events if event["message"] == "Assignment cleared")["target_status"] is None
+    assert next(event for event in events if event["message"] == "Marked job triaged")["target_status"] == "triaged"
+    assert cleared_job["status"] == next(
+        event["target_status"] for event in reversed(events) if event["target_status"] is not None
+    )
 
 
 def test_triage_and_schedule_are_role_gated(tmp_path) -> None:
@@ -773,6 +788,51 @@ def test_manual_event_endpoint_is_note_only_and_residents_cannot_add_events(tmp_
     assert "Extra inputs are not permitted" in invalid_structured_event.text
     assert valid_note.status_code == 201
     assert valid_note.json()["event_type"] == "note"
+    assert valid_note.json()["target_status"] is None
+
+
+def test_report_creation_emits_initial_event_target_status_and_status_cache(tmp_path) -> None:
+    app, client = build_client(tmp_path)
+
+    with client:
+        ids = lookup_ids(app)
+        switch_demo_user(client, "resident@fixhub.test")
+        job = create_job(client, location_id=ids["room_a14_location_id"])
+        events = job_events(client, job["id"])
+        fetched_job = client.get(f"/api/jobs/{job['id']}")
+
+    assert fetched_job.status_code == 200
+    assert len(events) == 1
+    assert events[0]["event_type"] == "report_created"
+    assert events[0]["target_status"] == "new"
+    assert fetched_job.json()["status"] == "new"
+
+
+def test_assignment_from_new_emits_audit_and_explicit_lifecycle_target_status(tmp_path) -> None:
+    app, client = build_client(tmp_path)
+
+    with client:
+        ids = lookup_ids(app)
+        switch_demo_user(client, "resident@fixhub.test")
+        job = create_job(client, location_id=ids["room_a14_location_id"])
+
+        switch_demo_user(client, "coordinator@fixhub.test")
+        assign_response = client.patch(
+            f"/api/jobs/{job['id']}",
+            json={"assigned_org_id": str(ids["newcastle_plumbing_org_id"])},
+        )
+        assert assign_response.status_code == 200, assign_response.text
+
+        switch_demo_user(client, "resident@fixhub.test")
+        events = job_events(client, job["id"])
+
+    assert [event["message"] for event in events] == [
+        "Report created",
+        "Assigned Newcastle Plumbing",
+        "Marked job assigned",
+    ]
+    assert [event["target_status"] for event in events] == ["new", None, "assigned"]
+    assert assign_response.json()["status"] == "assigned"
 
 
 def test_operations_job_page_includes_assignment_controls_for_dispatch_roles(tmp_path) -> None:
