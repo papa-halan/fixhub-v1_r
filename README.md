@@ -134,6 +134,8 @@ Job reads keep a stored `location_snapshot` so later location renames do not rew
 
 Timeline events carry both lifecycle intent (`target_status`) and the active assignment target at the time of the update. The `jobs` row still keeps the current assignee and cached status for filtering, but the event stream is the more truthful record of what happened and who the work was pointed at when it happened.
 
+Resident updates are intentionally narrow. The pilot accepts only structured resident coordination reasons that operations can act on consistently: `resident_access_update`, `resident_access_issue`, `issue_still_present`, and `resident_reported_recurrence`.
+
 Supported job states:
 
 - `new`

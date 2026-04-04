@@ -73,3 +73,10 @@ class ResponsibilityOwner(str, Enum):
     coordinator = "coordinator"
     contractor = "contractor"
     resident = "resident"
+
+
+class ResidentUpdateReason(str, Enum):
+    resident_access_update = "resident_access_update"
+    resident_access_issue = "resident_access_issue"
+    issue_still_present = "issue_still_present"
+    resident_reported_recurrence = "resident_reported_recurrence"

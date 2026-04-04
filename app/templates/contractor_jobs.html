@@ -40,7 +40,10 @@
       <p class="muted">{{ job.description }}</p>
       {% endif %}
       {% if job.latest_event_at %}
-      <p class="muted">Updated {{ job.latest_event_at|timestamp }}{% if job.latest_event_actor_label %} by {{ job.latest_event_actor_label }}{% endif %}</p>
+      <p class="muted">Latest timeline event: {{ job.latest_event_at|timestamp }}{% if job.latest_event_actor_label %} by {{ job.latest_event_actor_label }}{% endif %}</p>
+      {% endif %}
+      {% if job.latest_lifecycle_event_at %}
+      <p class="muted">Lifecycle last changed: {{ job.latest_lifecycle_event_at|timestamp }}{% if job.latest_lifecycle_event_actor_label %} by {{ job.latest_lifecycle_event_actor_label }}{% endif %}</p>
       {% endif %}
     </a>
     {% endfor %}

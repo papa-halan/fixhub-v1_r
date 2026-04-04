@@ -5,16 +5,21 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from app.models import JobStatus
+from app.models import JobStatus, ResidentUpdateReason
 
 
 RESIDENT_RECURRENCE_REASON_CODES = {
-    "issue_still_present",
-    "resident_reported_recurrence",
+    ResidentUpdateReason.issue_still_present.value,
+    ResidentUpdateReason.resident_reported_recurrence.value,
 }
 RESIDENT_ACCESS_REASON_CODES = {
-    "resident_access_update",
-    "resident_access_issue",
+    ResidentUpdateReason.resident_access_update.value,
+    ResidentUpdateReason.resident_access_issue.value,
+}
+ACCESS_BLOCKER_REASON_CODES = {
+    "no_access",
+    "awaiting_access_arrangement",
+    ResidentUpdateReason.resident_access_issue.value,
 }
 RESPONSIBILITY_OWNER_LABELS = {
     "reception_admin": "Front desk",
@@ -135,6 +140,9 @@ class CoordinationProjection:
     latest_event_id: Any | None
     latest_event_type: str | None
     latest_event_at: datetime | None
+    latest_lifecycle_event_id: Any | None
+    latest_lifecycle_event_type: str | None
+    latest_lifecycle_event_at: datetime | None
 
 
 @dataclass(frozen=True)
@@ -208,6 +216,20 @@ def latest_event_for_status(events: Iterable[Any], status: JobStatus) -> Any | N
         if assignment_events:
             return assignment_events[-1]
 
+    matching_events = [event for event in ordered_events if getattr(event, "target_status", None) == status]
+    if matching_events:
+        return matching_events[-1]
+
+    if status == JobStatus.new:
+        report_events = [event for event in ordered_events if getattr(event, "event_type", None) == "report_created"]
+        if report_events:
+            return report_events[-1]
+
+    return None
+
+
+def latest_lifecycle_event(events: Iterable[Any], status: JobStatus) -> Any | None:
+    ordered_events = sorted(events, key=_event_order_key)
     matching_events = [event for event in ordered_events if getattr(event, "target_status", None) == status]
     if matching_events:
         return matching_events[-1]
@@ -464,6 +486,21 @@ class PendingSignalProjection:
     created_at: datetime
 
 
+@dataclass(frozen=True)
+class VisitPlanProjection:
+    headline: str
+    summary: str
+    booking_message: str | None
+    booking_actor_label: str | None
+    booking_at: datetime | None
+    access_message: str | None
+    access_actor_label: str | None
+    access_at: datetime | None
+    blocker_message: str | None
+    blocker_actor_label: str | None
+    blocker_at: datetime | None
+
+
 def _newer_role_update(
     baseline: RoleUpdateProjection | None,
     candidates: Iterable[RoleUpdateProjection | None],
@@ -583,6 +620,113 @@ def derive_pending_signal(job: Any, events: Iterable[Any]) -> PendingSignalProje
     )
 
 
+def _event_timestamp(event: Any) -> datetime | None:
+    return getattr(event, "created_at", None)
+
+
+def _actor_label(event: Any) -> str | None:
+    actor_user = getattr(event, "actor_user", None)
+    if actor_user is None:
+        return None
+    actor_name = getattr(actor_user, "name", None) or "System"
+    organisation_name = getattr(getattr(actor_user, "organisation", None), "name", None)
+    if organisation_name:
+        return f"{actor_name} ({organisation_name})"
+    return actor_name
+
+
+def _latest_schedule_event(events: Iterable[Any]) -> Any | None:
+    ordered_events = sorted(events, key=_event_order_key)
+    matching = [
+        event
+        for event in ordered_events
+        if getattr(event, "target_status", None) in {JobStatus.scheduled, JobStatus.follow_up_scheduled}
+        or _enum_value(getattr(event, "event_type", None)) in {"schedule", "follow_up"}
+    ]
+    if not matching:
+        return None
+    return matching[-1]
+
+
+def _latest_access_event(events: Iterable[Any]) -> Any | None:
+    ordered_events = sorted(events, key=_event_order_key)
+    matching = [
+        event
+        for event in ordered_events
+        if _enum_value(getattr(getattr(event, "actor_user", None), "role", None)) == "resident"
+        and getattr(event, "reason_code", None) in RESIDENT_ACCESS_REASON_CODES
+    ]
+    if not matching:
+        return None
+    return matching[-1]
+
+
+def _latest_access_blocker_event(events: Iterable[Any]) -> Any | None:
+    ordered_events = sorted(events, key=_event_order_key)
+    matching = [
+        event
+        for event in ordered_events
+        if getattr(event, "reason_code", None) in ACCESS_BLOCKER_REASON_CODES
+        and (
+            getattr(event, "target_status", None) in {JobStatus.blocked, JobStatus.on_hold}
+            or _enum_value(getattr(event, "responsibility_stage", None)) in {"coordination", "execution"}
+        )
+    ]
+    if not matching:
+        return None
+    return matching[-1]
+
+
+def derive_visit_plan(job: Any, events: Iterable[Any]) -> VisitPlanProjection | None:
+    ordered_events = sorted(events, key=_event_order_key)
+    if not ordered_events:
+        return None
+
+    status = derive_job_status_from_events(ordered_events)
+    schedule_event = _latest_schedule_event(ordered_events)
+    access_event = _latest_access_event(ordered_events)
+    blocker_event = _latest_access_blocker_event(ordered_events)
+
+    headline = "Attendance planning not recorded yet"
+    summary = "Record the visit window, access path, and who should attend before treating the job as ready."
+
+    blocker_at = _event_timestamp(blocker_event)
+    schedule_at = _event_timestamp(schedule_event)
+    access_at = _event_timestamp(access_event)
+
+    if (
+        blocker_event is not None
+        and blocker_at is not None
+        and (schedule_at is None or blocker_at >= schedule_at)
+        and status in {JobStatus.blocked, JobStatus.on_hold, JobStatus.scheduled}
+    ):
+        headline = "Access arrangement is not ready for the next visit"
+        summary = "Resolve keys, resident timing, or site access first, then record the replacement attendance plan."
+    elif schedule_event is not None:
+        headline = "Current visit plan is recorded"
+        summary = "Use the booked window and latest access note as the working attendance plan."
+        if access_at is not None and schedule_at is not None and access_at > schedule_at:
+            headline = "Resident access note is newer than the booked visit"
+            summary = "Apply the resident access change to the booking before the next attendance."
+    elif status in {JobStatus.assigned, JobStatus.triaged, JobStatus.reopened}:
+        headline = "Attendance still needs a booked visit"
+        summary = "Set the first credible attendance window so resident, staff, and contractor are working from the same plan."
+
+    return VisitPlanProjection(
+        headline=headline,
+        summary=summary,
+        booking_message=getattr(schedule_event, "message", None),
+        booking_actor_label=_actor_label(schedule_event) if schedule_event is not None else None,
+        booking_at=schedule_at,
+        access_message=getattr(access_event, "message", None),
+        access_actor_label=_actor_label(access_event) if access_event is not None else None,
+        access_at=access_at,
+        blocker_message=getattr(blocker_event, "message", None),
+        blocker_actor_label=_actor_label(blocker_event) if blocker_event is not None else None,
+        blocker_at=blocker_at,
+    )
+
+
 def derive_coordination_projection(job: Any, events: Iterable[Any]) -> CoordinationProjection:
     ordered_events = sorted(events, key=_event_order_key)
     latest_event = ordered_events[-1] if ordered_events else None
@@ -590,6 +734,7 @@ def derive_coordination_projection(job: Any, events: Iterable[Any]) -> Coordinat
     summary = coordination_summary(job, ordered_events)
     assignment = derive_assignment_projection(job, ordered_events)
     anchor_event = coordination_anchor_event(ordered_events, status)
+    lifecycle_event = latest_lifecycle_event(ordered_events, status)
     responsibility_stage = _enum_value(getattr(anchor_event, "responsibility_stage", None))
     owner_scope = _enum_value(getattr(anchor_event, "owner_scope", None))
     responsibility_owner = _enum_value(getattr(anchor_event, "responsibility_owner", None))
@@ -611,4 +756,7 @@ def derive_coordination_projection(job: Any, events: Iterable[Any]) -> Coordinat
         latest_event_id=getattr(latest_event, "id", None),
         latest_event_type=_enum_value(getattr(latest_event, "event_type", None)),
         latest_event_at=getattr(latest_event, "created_at", None),
+        latest_lifecycle_event_id=getattr(lifecycle_event, "id", None),
+        latest_lifecycle_event_type=_enum_value(getattr(lifecycle_event, "event_type", None)),
+        latest_lifecycle_event_at=getattr(lifecycle_event, "created_at", None),
     )

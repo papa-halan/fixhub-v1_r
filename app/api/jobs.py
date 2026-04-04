@@ -12,6 +12,7 @@ from app.api.deps import (
     get_session,
     serialize_event,
     serialize_job,
+    serialize_job_with_history,
     serialize_user,
     visible_events,
     visible_job,
@@ -25,6 +26,7 @@ from app.models import (
     OwnerScope,
     Organisation,
     OrganisationType,
+    ResidentUpdateReason,
     ResponsibilityOwner,
     ResponsibilityStage,
     User,
@@ -126,7 +128,7 @@ def get_job(
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ):
-    return serialize_job(visible_job(session, current_user, job_id))
+    return serialize_job_with_history(session, current_user, job=visible_job(session, current_user, job_id))
 
 def build_assignment_events(
     *,
@@ -377,13 +379,17 @@ def add_resident_update(
     job = visible_job(session, current_user, job_id)
     if current_user.role != UserRole.resident:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only residents can add resident updates")
-    reason_code = payload.reason_code
+    reason_code = payload.reason_code.value if payload.reason_code is not None else None
     responsibility_stage = ResponsibilityStage.reception
     responsibility_owner = ResponsibilityOwner.reception_admin
-    if reason_code == "resident_access_update":
+    if reason_code == ResidentUpdateReason.resident_access_update.value:
         responsibility_stage = ResponsibilityStage.coordination
         responsibility_owner = ResponsibilityOwner.triage_officer
-    elif reason_code in {"resident_access_issue", "issue_still_present", "resident_reported_recurrence"}:
+    elif reason_code in {
+        ResidentUpdateReason.resident_access_issue.value,
+        ResidentUpdateReason.issue_still_present.value,
+        ResidentUpdateReason.resident_reported_recurrence.value,
+    }:
         responsibility_stage = ResponsibilityStage.triage
         responsibility_owner = ResponsibilityOwner.triage_officer
     event = append_event(

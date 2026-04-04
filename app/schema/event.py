@@ -5,7 +5,15 @@ from datetime import datetime
 
 from pydantic import ValidationInfo, field_validator
 
-from app.models import EventType, JobStatus, OwnerScope, ResponsibilityOwner, ResponsibilityStage, UserRole
+from app.models import (
+    EventType,
+    JobStatus,
+    OwnerScope,
+    ResidentUpdateReason,
+    ResponsibilityOwner,
+    ResponsibilityStage,
+    UserRole,
+)
 from app.schema.base import SchemaModel, strip_non_blank
 
 
@@ -31,20 +39,12 @@ class EventCreate(SchemaModel):
 
 class ResidentUpdateCreate(SchemaModel):
     message: str
-    reason_code: str | None = None
+    reason_code: ResidentUpdateReason | None = None
 
     @field_validator("message")
     @classmethod
     def validate_message(cls, value: str, info: ValidationInfo) -> str:
         return strip_non_blank(value, info.field_name)
-
-    @field_validator("reason_code")
-    @classmethod
-    def validate_reason_code(cls, value: str | None, info: ValidationInfo) -> str | None:
-        if value is None:
-            return None
-        return strip_non_blank(value, info.field_name)
-
 
 class EventRead(SchemaModel):
     id: uuid.UUID

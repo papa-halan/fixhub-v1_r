@@ -55,8 +55,14 @@
         </div>
         {% if job.latest_event_at %}
         <div class="meta-item">
-          <span>Latest update</span>
+          <span>Latest timeline event</span>
           <strong>{{ job.latest_event_at|timestamp }}{% if job.latest_event_actor_label %} by {{ job.latest_event_actor_label }}{% endif %}</strong>
+        </div>
+        {% endif %}
+        {% if job.latest_lifecycle_event_at %}
+        <div class="meta-item">
+          <span>Lifecycle last changed</span>
+          <strong>{{ job.latest_lifecycle_event_at|timestamp }}{% if job.latest_lifecycle_event_actor_label %} by {{ job.latest_lifecycle_event_actor_label }}{% endif %}</strong>
         </div>
         {% endif %}
       </div>
@@ -133,6 +139,16 @@
       <div class="panel-header">
         <h2>Repeat history at this location</h2>
         <p>Use prior jobs here to spot recurring failures before treating this as an isolated ticket.</p>
+      </div>
+      <div class="meta-list">
+        <div class="meta-item">
+          <span>Operational history signal</span>
+          <strong>{{ job.operational_history_headline }}</strong>
+        </div>
+        <div class="meta-item">
+          <span>What the record says</span>
+          <strong>{{ job.operational_history_summary }}</strong>
+        </div>
       </div>
       {% if related_jobs %}
       <div class="meta-list">

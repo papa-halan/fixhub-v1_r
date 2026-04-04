@@ -1512,6 +1512,57 @@ def test_resident_can_add_access_update_that_staff_can_see_on_job_page(tmp_path)
     assert events[-1]["responsibility_owner"] == "triage_officer"
 
 
+def test_job_read_includes_operational_history_summary_for_repeat_asset(tmp_path) -> None:
+    app, client = build_client(tmp_path)
+
+    with client:
+        ids = lookup_ids(app)
+        switch_demo_user(client, "resident@fixhub.test")
+        first_job = create_job(client, location_id=ids["room_a14_location_id"])
+        complete_org_assigned_job(
+            client,
+            first_job["id"],
+            assigned_org_id=ids["newcastle_plumbing_org_id"],
+        )
+
+        switch_demo_user(client, "resident@fixhub.test")
+        repeat_job = create_job(
+            client,
+            location_id=ids["room_a14_location_id"],
+            title="Tap leaking again after prior repair",
+        )
+        job_read = client.get(f"/api/jobs/{repeat_job['id']}")
+
+    assert job_read.status_code == 200
+    payload = job_read.json()
+    assert payload["operational_history_headline"] == "Earlier work exists on this asset"
+    assert payload["operational_history_summary"] == (
+        "1 earlier visible job(s) here, including 1 on this asset. "
+        "0 related job(s) are still open. Latest earlier record: Leaking bathroom tap (Completed)."
+    )
+    assert payload["operational_history_location_job_count"] == 1
+    assert payload["operational_history_asset_job_count"] == 1
+    assert payload["operational_history_open_job_count"] == 0
+
+
+def test_operations_job_page_surfaces_operational_history_signal(tmp_path) -> None:
+    app, client = build_client(tmp_path)
+
+    with client:
+        ids = lookup_ids(app)
+        switch_demo_user(client, "resident@fixhub.test")
+        first_job = create_job(client, location_id=ids["room_a14_location_id"], title="Earlier mixer leak")
+        create_job(client, location_id=ids["room_a14_location_id"], title="Repeat mixer leak")
+
+        switch_demo_user(client, "coordinator@fixhub.test", next_path=f"/admin/jobs/{first_job['id']}")
+        page = client.get(f"/admin/jobs/{first_job['id']}")
+
+    assert page.status_code == 200
+    assert "Operational history signal" in page.text
+    assert "Earlier work exists on this asset" in page.text
+    assert "1 earlier visible job(s) here, including 1 on this asset." in page.text
+
+
 def test_job_read_includes_latest_cross_role_updates(tmp_path) -> None:
     app, client = build_client(tmp_path)
 
@@ -1812,6 +1863,7 @@ def test_response_needed_signal_tracks_newer_cross_role_updates(tmp_path) -> Non
         )
         assert blocked_response.status_code == 200, blocked_response.text
 
+        switch_demo_user(client, "triage@fixhub.test")
         admin_blocked_read = client.get(f"/api/jobs/{contractor_job['id']}")
         blocked_queue = client.get("/admin/jobs")
 
@@ -1895,6 +1947,27 @@ def test_non_residents_cannot_use_resident_update_endpoint(tmp_path) -> None:
 
     assert response.status_code == 403
     assert response.json() == {"detail": "Only residents can add resident updates"}
+
+
+def test_resident_update_rejects_unknown_reason_codes(tmp_path) -> None:
+    app, client = build_client(tmp_path)
+
+    with client:
+        ids = lookup_ids(app)
+        switch_demo_user(client, "resident@fixhub.test")
+        job = create_job(client, location_id=ids["room_a14_location_id"])
+
+        response = client.post(
+            f"/api/jobs/{job['id']}/resident-update",
+            json={
+                "message": "The access plan changed again.",
+                "reason_code": "access_changed_again",
+            },
+        )
+
+    assert response.status_code == 422
+    assert "resident_access_update" in response.text
+    assert "resident_access_issue" in response.text
 
 
 def test_operations_pages_hide_controls_by_role(tmp_path) -> None:

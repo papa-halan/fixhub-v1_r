@@ -14,7 +14,7 @@ from app.api.deps import (
     render_page,
     require_role,
     serialize_event,
-    serialize_job,
+    serialize_job_with_history,
     visible_events,
     visible_job,
     visible_jobs,
@@ -54,7 +54,7 @@ def contractor_job_page(
     job = visible_job(session, current_user, job_id)
     events = visible_events(session, job_id)
     can_update_job = contractor_has_current_assignment(job, current_user)
-    serialized_job = serialize_job(job)
+    serialized_job = serialize_job_with_history(session, current_user, job=job)
     status_actions = available_status_actions(
         current_status=JobStatus(serialized_job["status"]),
         actor=current_user,

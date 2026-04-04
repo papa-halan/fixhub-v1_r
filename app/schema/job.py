@@ -92,6 +92,9 @@ class JobRead(SchemaModel):
     latest_event_type: EventType | None = None
     latest_event_actor_label: str | None = None
     latest_event_at: datetime | None = None
+    latest_lifecycle_event_type: EventType | None = None
+    latest_lifecycle_event_actor_label: str | None = None
+    latest_lifecycle_event_at: datetime | None = None
     latest_resident_update_message: str | None = None
     latest_resident_update_actor_label: str | None = None
     latest_resident_update_at: datetime | None = None
@@ -105,5 +108,21 @@ class JobRead(SchemaModel):
     pending_signal_summary: str | None = None
     pending_signal_actor_label: str | None = None
     pending_signal_at: datetime | None = None
+    visit_plan_headline: str | None = None
+    visit_plan_summary: str | None = None
+    visit_booking_message: str | None = None
+    visit_booking_actor_label: str | None = None
+    visit_booking_at: datetime | None = None
+    visit_access_message: str | None = None
+    visit_access_actor_label: str | None = None
+    visit_access_at: datetime | None = None
+    visit_blocker_message: str | None = None
+    visit_blocker_actor_label: str | None = None
+    visit_blocker_at: datetime | None = None
+    operational_history_headline: str | None = None
+    operational_history_summary: str | None = None
+    operational_history_location_job_count: int = 0
+    operational_history_asset_job_count: int = 0
+    operational_history_open_job_count: int = 0
     created_at: datetime
     updated_at: datetime

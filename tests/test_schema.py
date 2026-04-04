@@ -13,11 +13,22 @@ from app.models import (
     Location,
     LocationType,
     OwnerScope,
+    ResidentUpdateReason,
     ResponsibilityOwner,
     ResponsibilityStage,
     User,
 )
-from app.schema import EventCreate, EventRead, JobCreate, JobRead, JobUpdate, LocationOption, LocationRead, LoginRequest
+from app.schema import (
+    EventCreate,
+    EventRead,
+    JobCreate,
+    JobRead,
+    JobUpdate,
+    LocationOption,
+    LocationRead,
+    LoginRequest,
+    ResidentUpdateCreate,
+)
 from app.services.passwords import hash_password, verify_password
 
 
@@ -121,6 +132,22 @@ def test_event_read_includes_optional_target_status() -> None:
 
     assert event.target_status == JobStatus.completed
     assert event.assigned_org_name == "Newcastle Plumbing"
+
+
+def test_resident_update_create_only_accepts_structured_pilot_reason_codes() -> None:
+    payload = ResidentUpdateCreate(
+        message="  Please avoid 1-2pm because the room is locked  ",
+        reason_code="resident_access_update",
+    )
+
+    assert payload.message == "Please avoid 1-2pm because the room is locked"
+    assert payload.reason_code == ResidentUpdateReason.resident_access_update
+
+    with pytest.raises(ValidationError):
+        ResidentUpdateCreate(
+            message="Please avoid 1-2pm because the room is locked",
+            reason_code="access_changed_again",
+        )
 
 
 def test_login_request_trims_credentials() -> None:

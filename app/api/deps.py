@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
@@ -25,6 +26,7 @@ from app.services import (
     derive_assignment_projection,
     derive_coordination_projection,
     derive_pending_signal,
+    derive_visit_plan,
     latest_role_update,
     list_demo_users,
     role_label,
@@ -52,6 +54,17 @@ ROLE_HOMES = {
     UserRole.coordinator: "/admin/jobs",
     UserRole.contractor: "/contractor/jobs",
 }
+
+RESOLVED_JOB_STATUSES = {JobStatus.completed, JobStatus.cancelled}
+
+
+@dataclass(frozen=True)
+class OperationalHistoryProjection:
+    headline: str
+    summary: str
+    location_job_count: int
+    asset_job_count: int
+    open_job_count: int
 
 
 def get_session(request: Request):
@@ -238,7 +251,13 @@ def serialize_job(job: Job) -> dict[str, object]:
     assignment = derive_assignment_projection(job, job.events)
     projection = derive_coordination_projection(job, job.events)
     pending_signal = derive_pending_signal(job, job.events)
+    visit_plan = derive_visit_plan(job, job.events)
     latest_event = max(job.events, key=lambda event: (event.created_at, event.id)) if job.events else None
+    lifecycle_event = (
+        next((event for event in job.events if event.id == projection.latest_lifecycle_event_id), None)
+        if projection.latest_lifecycle_event_id is not None
+        else None
+    )
     latest_resident_update = latest_role_update(job.events, roles={UserRole.resident.value})
     latest_operations_update = latest_role_update(
         job.events,
@@ -281,6 +300,9 @@ def serialize_job(job: Job) -> dict[str, object]:
         "latest_event_type": projection.latest_event_type,
         "latest_event_actor_label": actor_label(latest_event) if latest_event is not None else None,
         "latest_event_at": projection.latest_event_at,
+        "latest_lifecycle_event_type": projection.latest_lifecycle_event_type,
+        "latest_lifecycle_event_actor_label": actor_label(lifecycle_event) if lifecycle_event is not None else None,
+        "latest_lifecycle_event_at": projection.latest_lifecycle_event_at,
         "latest_resident_update_message": (
             latest_resident_update.message if latest_resident_update is not None else None
         ),
@@ -310,6 +332,22 @@ def serialize_job(job: Job) -> dict[str, object]:
         "pending_signal_summary": pending_signal.summary if pending_signal is not None else None,
         "pending_signal_actor_label": pending_signal.actor_label if pending_signal is not None else None,
         "pending_signal_at": pending_signal.created_at if pending_signal is not None else None,
+        "visit_plan_headline": visit_plan.headline if visit_plan is not None else None,
+        "visit_plan_summary": visit_plan.summary if visit_plan is not None else None,
+        "visit_booking_message": visit_plan.booking_message if visit_plan is not None else None,
+        "visit_booking_actor_label": visit_plan.booking_actor_label if visit_plan is not None else None,
+        "visit_booking_at": visit_plan.booking_at if visit_plan is not None else None,
+        "visit_access_message": visit_plan.access_message if visit_plan is not None else None,
+        "visit_access_actor_label": visit_plan.access_actor_label if visit_plan is not None else None,
+        "visit_access_at": visit_plan.access_at if visit_plan is not None else None,
+        "visit_blocker_message": visit_plan.blocker_message if visit_plan is not None else None,
+        "visit_blocker_actor_label": visit_plan.blocker_actor_label if visit_plan is not None else None,
+        "visit_blocker_at": visit_plan.blocker_at if visit_plan is not None else None,
+        "operational_history_headline": None,
+        "operational_history_summary": None,
+        "operational_history_location_job_count": 0,
+        "operational_history_asset_job_count": 0,
+        "operational_history_open_job_count": 0,
         "created_at": job.created_at,
         "updated_at": job.updated_at,
     }
@@ -486,10 +524,107 @@ def related_jobs_for_user(
     job: Job,
     limit: int = 5,
 ) -> list[dict[str, object]]:
+    matching_jobs = related_job_records_for_user(session, user, job=job)
+    return [serialize_related_job(candidate, current_job=job) for candidate in matching_jobs[:limit]]
+
+
+def related_job_records_for_user(
+    session: Session,
+    user: User,
+    *,
+    job: Job,
+) -> list[Job]:
     related_jobs = [candidate for candidate in visible_jobs(session, user) if candidate.id != job.id]
     matching_jobs = [candidate for candidate in related_jobs if candidate.location_id == job.location_id]
+    if job.asset_id is not None:
+        matching_jobs.sort(
+            key=lambda candidate: (
+                candidate.asset_id == job.asset_id,
+                candidate.updated_at,
+                candidate.created_at,
+            ),
+            reverse=True,
+        )
+        return matching_jobs
     matching_jobs.sort(key=lambda candidate: (candidate.updated_at, candidate.created_at), reverse=True)
-    return [serialize_related_job(candidate, current_job=job) for candidate in matching_jobs[:limit]]
+    return matching_jobs
+
+
+def operational_history_for_user(
+    session: Session,
+    user: User,
+    *,
+    job: Job,
+) -> OperationalHistoryProjection:
+    related_jobs = related_job_records_for_user(session, user, job=job)
+    location_job_count = len(related_jobs)
+    asset_job_count = (
+        len([candidate for candidate in related_jobs if job.asset_id is not None and candidate.asset_id == job.asset_id])
+        if job.asset_id is not None
+        else 0
+    )
+    open_job_count = len(
+        [
+            candidate
+            for candidate in related_jobs
+            if derive_coordination_projection(candidate, candidate.events).status not in RESOLVED_JOB_STATUSES
+        ]
+    )
+
+    if location_job_count == 0:
+        return OperationalHistoryProjection(
+            headline="No earlier visible operational history at this location",
+            summary="This is the first visible record here, so future coordination will start from this timeline.",
+            location_job_count=0,
+            asset_job_count=0,
+            open_job_count=0,
+        )
+
+    latest_related = related_jobs[0]
+    latest_related_projection = derive_coordination_projection(latest_related, latest_related.events)
+    if asset_job_count > 0:
+        headline = "Earlier work exists on this asset"
+    else:
+        headline = "Earlier work exists at this location"
+
+    if job.asset_id is not None:
+        scope_summary = f"{location_job_count} earlier visible job(s) here, including {asset_job_count} on this asset"
+    else:
+        scope_summary = (
+            f"{location_job_count} earlier visible job(s) here; this job has no asset selected so repeat checks stay "
+            "location-based"
+        )
+
+    return OperationalHistoryProjection(
+        headline=headline,
+        summary=(
+            f"{scope_summary}. {open_job_count} related job(s) are still open. "
+            f"Latest earlier record: {latest_related.title} ({status_label(latest_related_projection.status)})."
+        ),
+        location_job_count=location_job_count,
+        asset_job_count=asset_job_count,
+        open_job_count=open_job_count,
+    )
+
+
+def serialize_job_with_history(
+    session: Session,
+    user: User,
+    *,
+    job: Job,
+) -> dict[str, object]:
+    payload = serialize_job(job)
+    history = operational_history_for_user(session, user, job=job)
+    payload.update(
+        {
+            "operational_history_headline": history.headline,
+            "operational_history_summary": history.summary,
+            "operational_history_location_job_count": history.location_job_count,
+            "operational_history_asset_job_count": history.asset_job_count,
+            "operational_history_open_job_count": history.open_job_count,
+        }
+    )
+    return payload
 
 
 def render_page(
