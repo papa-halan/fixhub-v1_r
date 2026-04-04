@@ -113,6 +113,25 @@
     </div>
   </article>
 
+  {% if job.pending_signal_at %}
+  <article class="panel">
+    <div class="panel-header">
+      <h2>Response-needed signal</h2>
+      <p>{{ job.pending_signal_headline }}</p>
+    </div>
+    <div class="meta-list">
+      <div class="meta-item">
+        <span>Newest unresolved update</span>
+        <strong>{{ job.pending_signal_actor_label }} at {{ job.pending_signal_at|timestamp }}</strong>
+      </div>
+      <div class="meta-item">
+        <span>What to do with it</span>
+        <strong>{{ job.pending_signal_summary }}</strong>
+      </div>
+    </div>
+  </article>
+  {% endif %}
+
   <article class="panel">
     <div class="panel-header">
       <h2>Earlier reports here</h2>

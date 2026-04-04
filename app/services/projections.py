@@ -140,6 +140,7 @@ class CoordinationProjection:
 @dataclass(frozen=True)
 class RoleUpdateProjection:
     actor_label: str
+    actor_role: str
     message: str
     reason_code: str | None
     created_at: datetime
@@ -446,11 +447,140 @@ def latest_role_update(events: Iterable[Any], *, roles: set[str]) -> RoleUpdateP
             actor_label = actor_name
         return RoleUpdateProjection(
             actor_label=actor_label,
+            actor_role=actor_role_value,
             message=getattr(event, "message", None) or "",
             reason_code=getattr(event, "reason_code", None),
             created_at=getattr(event, "created_at"),
         )
     return None
+
+
+@dataclass(frozen=True)
+class PendingSignalProjection:
+    headline: str
+    summary: str
+    actor_label: str
+    actor_role: str
+    created_at: datetime
+
+
+def _newer_role_update(
+    baseline: RoleUpdateProjection | None,
+    candidates: Iterable[RoleUpdateProjection | None],
+) -> RoleUpdateProjection | None:
+    comparable = [candidate for candidate in candidates if candidate is not None]
+    if baseline is not None:
+        comparable = [candidate for candidate in comparable if candidate.created_at > baseline.created_at]
+    if not comparable:
+        return None
+    comparable.sort(key=lambda candidate: candidate.created_at)
+    return comparable[-1]
+
+
+def _pending_signal_copy(
+    *,
+    owner_role: str | None,
+    status: JobStatus,
+    source: RoleUpdateProjection,
+) -> tuple[str, str]:
+    if source.actor_role == "resident":
+        if source.reason_code in RESIDENT_ACCESS_REASON_CODES:
+            if owner_role == "contractor":
+                return (
+                    "Resident access detail changed after the last field update",
+                    "Read the resident note before attending or recording further field progress.",
+                )
+            return (
+                "Resident access detail needs operations follow-through",
+                "Apply the resident note to scheduling, dispatch, or follow-up before the next visit.",
+            )
+        if source.reason_code in RESIDENT_RECURRENCE_REASON_CODES:
+            return (
+                "Resident reported the issue is still active",
+                "Review the recurrence and decide whether to reopen the job or schedule follow-up work.",
+            )
+        return (
+            "Resident added a newer coordination note",
+            "Use the resident update before the next workflow change or callback.",
+        )
+
+    if source.actor_role == "contractor":
+        if status == JobStatus.blocked:
+            return (
+                "Field blocker needs coordination",
+                "Review the field update and record the rebooking, access, or escalation path.",
+            )
+        if status == JobStatus.completed and owner_role == "resident":
+            return (
+                "Field team marked the work complete",
+                "Confirm whether the issue is resolved or report if it returns after the visit.",
+            )
+        return (
+            "Field progress is newer than the last operations update",
+            "Use the site update before the next triage, dispatch, or resident handoff.",
+        )
+
+    if source.actor_role in {"admin", "reception_admin", "triage_officer", "coordinator"}:
+        if owner_role == "contractor":
+            return (
+                "New operations handoff is waiting on contractor action",
+                "Check the latest booking or scope note before attending site or posting progress.",
+            )
+        if owner_role == "resident":
+            if status == JobStatus.completed:
+                return (
+                    "Completion update is waiting on resident confirmation",
+                    "Confirm whether the issue is resolved after the visit or report recurrence.",
+                )
+            return (
+                "Staff posted a newer update for the resident",
+                "Read the latest staff note before replying or following up.",
+            )
+        return (
+            "Operations posted a newer coordination update",
+            "Use the latest staff handoff before the next workflow change.",
+        )
+
+    return (
+        "A newer coordination signal needs attention",
+        "Review the latest update before recording the next action on this job.",
+    )
+
+
+def derive_pending_signal(job: Any, events: Iterable[Any]) -> PendingSignalProjection | None:
+    ordered_events = sorted(events, key=_event_order_key)
+    if not ordered_events:
+        return None
+
+    projection = derive_coordination_projection(job, ordered_events)
+    owner_role = projection.responsibility_owner
+    status = projection.status
+    latest_resident = latest_role_update(ordered_events, roles={"resident"})
+    latest_operations = latest_role_update(
+        ordered_events,
+        roles={"admin", "reception_admin", "triage_officer", "coordinator"},
+    )
+    latest_contractor = latest_role_update(ordered_events, roles={"contractor"})
+
+    source: RoleUpdateProjection | None = None
+    if owner_role in {"reception_admin", "triage_officer", "coordinator"}:
+        source = _newer_role_update(latest_operations, [latest_resident, latest_contractor])
+    elif owner_role == "contractor":
+        source = _newer_role_update(latest_contractor, [latest_resident, latest_operations])
+    elif owner_role == "resident":
+        source = _newer_role_update(latest_resident, [latest_operations, latest_contractor])
+
+    if source is None:
+        return None
+
+    headline, summary = _pending_signal_copy(owner_role=owner_role, status=status, source=source)
+    return PendingSignalProjection(
+        headline=headline,
+        summary=summary,
+        actor_label=source.actor_label,
+        actor_role=source.actor_role,
+        created_at=source.created_at,
+    )
 
 
 def derive_coordination_projection(job: Any, events: Iterable[Any]) -> CoordinationProjection:

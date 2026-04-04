@@ -24,6 +24,7 @@ from app.services import (
     OPERATIONS_ROLES,
     derive_assignment_projection,
     derive_coordination_projection,
+    derive_pending_signal,
     latest_role_update,
     list_demo_users,
     role_label,
@@ -236,6 +237,7 @@ def job_asset_name(job: Job) -> str | None:
 def serialize_job(job: Job) -> dict[str, object]:
     assignment = derive_assignment_projection(job, job.events)
     projection = derive_coordination_projection(job, job.events)
+    pending_signal = derive_pending_signal(job, job.events)
     latest_event = max(job.events, key=lambda event: (event.created_at, event.id)) if job.events else None
     latest_resident_update = latest_role_update(job.events, roles={UserRole.resident.value})
     latest_operations_update = latest_role_update(
@@ -304,6 +306,10 @@ def serialize_job(job: Job) -> dict[str, object]:
         "latest_contractor_update_at": (
             latest_contractor_update.created_at if latest_contractor_update is not None else None
         ),
+        "pending_signal_headline": pending_signal.headline if pending_signal is not None else None,
+        "pending_signal_summary": pending_signal.summary if pending_signal is not None else None,
+        "pending_signal_actor_label": pending_signal.actor_label if pending_signal is not None else None,
+        "pending_signal_at": pending_signal.created_at if pending_signal is not None else None,
         "created_at": job.created_at,
         "updated_at": job.updated_at,
     }

@@ -110,6 +110,25 @@
       </div>
     </section>
 
+    {% if job.pending_signal_at %}
+    <section class="panel">
+      <div class="panel-header">
+        <h2>Response-needed signal</h2>
+        <p>{{ job.pending_signal_headline }}</p>
+      </div>
+      <div class="meta-list">
+        <div class="meta-item">
+          <span>Newest unresolved update</span>
+          <strong>{{ job.pending_signal_actor_label }} at {{ job.pending_signal_at|timestamp }}</strong>
+        </div>
+        <div class="meta-item">
+          <span>What to do with it</span>
+          <strong>{{ job.pending_signal_summary }}</strong>
+        </div>
+      </div>
+    </section>
+    {% endif %}
+
     <section class="panel">
       <div class="panel-header">
         <h2>Repeat history at this location</h2>
@@ -191,7 +210,7 @@
       {% if status_actions %}
       <div class="actions">
         {% for action in status_actions %}
-        <button class="button secondary" data-status="{{ action.status.value }}" type="button">{{ action.label }}</button>
+        <button class="button secondary" data-status="{{ action.status }}" type="button">{{ action.label }}</button>
         {% endfor %}
       </div>
       {% else %}

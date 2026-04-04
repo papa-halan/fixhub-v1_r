@@ -52,6 +52,10 @@
       {% if job.action_required_summary %}
       <p class="muted">Action needed now: {{ job.action_required_summary }}</p>
       {% endif %}
+      {% if job.pending_signal_at %}
+      <p class="muted">Response-needed signal: {{ job.pending_signal_headline }} from {{ job.pending_signal_actor_label }} at {{ job.pending_signal_at|timestamp }}</p>
+      <p class="muted">{{ job.pending_signal_summary }}</p>
+      {% endif %}
       {% if job.latest_resident_update_at %}
       <p class="muted">Resident signal: {{ job.latest_resident_update_message }}{% if job.latest_resident_update_actor_label %} ({{ job.latest_resident_update_actor_label }}){% endif %} at {{ job.latest_resident_update_at|timestamp }}</p>
       {% endif %}

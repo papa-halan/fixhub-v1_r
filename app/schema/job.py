@@ -101,5 +101,9 @@ class JobRead(SchemaModel):
     latest_contractor_update_message: str | None = None
     latest_contractor_update_actor_label: str | None = None
     latest_contractor_update_at: datetime | None = None
+    pending_signal_headline: str | None = None
+    pending_signal_summary: str | None = None
+    pending_signal_actor_label: str | None = None
+    pending_signal_at: datetime | None = None
     created_at: datetime
     updated_at: datetime

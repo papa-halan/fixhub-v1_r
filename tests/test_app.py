@@ -1756,6 +1756,91 @@ def test_job_pages_surface_repeat_history_for_same_location(tmp_path) -> None:
     assert "Work marked complete" in contractor_page.text
 
 
+def test_response_needed_signal_tracks_newer_cross_role_updates(tmp_path) -> None:
+    app, client = build_client(tmp_path)
+
+    with client:
+        ids = lookup_ids(app)
+        switch_demo_user(client, "resident@fixhub.test")
+        resident_job = create_job(client, location_id=ids["room_a14_location_id"], title="Shower access changed")
+
+        switch_demo_user(client, "coordinator@fixhub.test")
+        assign_response = client.patch(
+            f"/api/jobs/{resident_job['id']}",
+            json={"assigned_org_id": str(ids["campus_maintenance_org_id"])},
+        )
+        assert assign_response.status_code == 200, assign_response.text
+
+        switch_demo_user(client, "triage@fixhub.test")
+        triage_response = client.patch(f"/api/jobs/{resident_job['id']}", json={"status": "triaged"})
+        assert triage_response.status_code == 200, triage_response.text
+        schedule_response = client.patch(
+            f"/api/jobs/{resident_job['id']}",
+            json={"status": "scheduled", "event_message": "Booked maintenance for Wednesday afternoon"},
+        )
+        assert schedule_response.status_code == 200, schedule_response.text
+
+        switch_demo_user(client, "resident@fixhub.test")
+        resident_update = client.post(
+            f"/api/jobs/{resident_job['id']}/resident-update",
+            json={
+                "message": "Please avoid 1-2pm because the room is locked for a welfare check.",
+                "reason_code": "resident_access_update",
+            },
+        )
+        assert resident_update.status_code == 201, resident_update.text
+
+        switch_demo_user(client, "triage@fixhub.test")
+        resident_job_read = client.get(f"/api/jobs/{resident_job['id']}")
+        admin_queue = client.get("/admin/jobs")
+        contractor_detail = None
+
+        switch_demo_user(client, "maintenance.contractor@fixhub.test", next_path=f"/contractor/jobs/{resident_job['id']}")
+        contractor_detail = client.get(f"/contractor/jobs/{resident_job['id']}")
+
+        switch_demo_user(client, "resident@fixhub.test")
+        contractor_job = create_job(client, location_id=ids["room_a14_location_id"], title="Blocked plumbing visit")
+        move_to_in_progress(client, contractor_job["id"], assigned_org_id=ids["newcastle_plumbing_org_id"])
+
+        blocked_response = client.patch(
+            f"/api/jobs/{contractor_job['id']}",
+            json={
+                "status": "blocked",
+                "reason_code": "no_access",
+                "event_message": "Arrived on site but front desk had no master key available for the room.",
+            },
+        )
+        assert blocked_response.status_code == 200, blocked_response.text
+
+        admin_blocked_read = client.get(f"/api/jobs/{contractor_job['id']}")
+        blocked_queue = client.get("/admin/jobs")
+
+    assert resident_job_read.status_code == 200
+    resident_payload = resident_job_read.json()
+    assert resident_payload["pending_signal_headline"] == "Resident access detail needs operations follow-through"
+    assert resident_payload["pending_signal_summary"] == (
+        "Apply the resident note to scheduling, dispatch, or follow-up before the next visit."
+    )
+    assert resident_payload["pending_signal_actor_label"] == "Riley Resident (Student Living)"
+
+    assert admin_queue.status_code == 200
+    assert "Response-needed signal: Resident access detail needs operations follow-through" in admin_queue.text
+    assert "Please avoid 1-2pm because the room is locked for a welfare check." in contractor_detail.text
+    assert "Response-needed signal" in contractor_detail.text
+    assert "Resident access detail needs operations follow-through" in contractor_detail.text
+
+    assert admin_blocked_read.status_code == 200
+    blocked_payload = admin_blocked_read.json()
+    assert blocked_payload["pending_signal_headline"] == "Field blocker needs coordination"
+    assert blocked_payload["pending_signal_summary"] == (
+        "Review the field update and record the rebooking, access, or escalation path."
+    )
+    assert blocked_payload["pending_signal_actor_label"] == "Devon Contractor (Newcastle Plumbing)"
+
+    assert blocked_queue.status_code == 200
+    assert "Response-needed signal: Field blocker needs coordination" in blocked_queue.text
+
+
 def test_completed_job_surfaces_resident_recurrence_without_fake_status_change(tmp_path) -> None:
     app, client = build_client(tmp_path)
 
@@ -1834,8 +1919,11 @@ def test_operations_pages_hide_controls_by_role(tmp_path) -> None:
     assert triage_page.status_code == 200
     assert 'name="assigned_org_id"' not in triage_page.text
     assert 'data-status="triaged"' in triage_page.text
-    assert 'data-status="scheduled"' in triage_page.text
+    assert 'data-status="scheduled"' not in triage_page.text
+    assert 'data-status="on_hold"' in triage_page.text
     assert 'data-status="escalated"' not in triage_page.text
+    assert 'data-status="follow_up_scheduled"' not in triage_page.text
+    assert 'data-status="reopened"' not in triage_page.text
 
 
 def test_contractor_job_page_hides_on_hold_control(tmp_path) -> None:
@@ -1851,10 +1939,36 @@ def test_contractor_job_page_hides_on_hold_control(tmp_path) -> None:
         page = client.get(f"/contractor/jobs/{job['id']}")
 
     assert page.status_code == 200
-    assert 'data-status="in_progress"' in page.text
     assert 'data-status="blocked"' in page.text
     assert 'data-status="completed"' in page.text
+    assert 'data-status="in_progress"' not in page.text
     assert 'data-status="on_hold"' not in page.text
     assert 'name="event_message"' in page.text
     assert 'name="reason_code"' in page.text
     assert 'name="responsibility_owner"' in page.text
+
+
+def test_operations_page_only_shows_follow_up_or_reopen_when_job_state_allows_it(tmp_path) -> None:
+    app, client = build_client(tmp_path)
+
+    with client:
+        ids = lookup_ids(app)
+        switch_demo_user(client, "resident@fixhub.test")
+        job = create_job(client, location_id=ids["room_a14_location_id"], title="Recurring leak review")
+        complete_org_assigned_job(client, job["id"], assigned_org_id=ids["newcastle_plumbing_org_id"])
+
+        switch_demo_user(client, "triage@fixhub.test", next_path=f"/admin/jobs/{job['id']}")
+        triage_page = client.get(f"/admin/jobs/{job['id']}")
+
+        switch_demo_user(client, "coordinator@fixhub.test", next_path=f"/admin/jobs/{job['id']}")
+        coordinator_page = client.get(f"/admin/jobs/{job['id']}")
+
+    assert triage_page.status_code == 200
+    assert 'data-status="follow_up_scheduled"' in triage_page.text
+    assert 'data-status="reopened"' not in triage_page.text
+    assert 'data-status="scheduled"' not in triage_page.text
+
+    assert coordinator_page.status_code == 200
+    assert 'data-status="reopened"' in coordinator_page.text
+    assert 'data-status="follow_up_scheduled"' not in coordinator_page.text
+    assert 'data-status="escalated"' not in coordinator_page.text
