@@ -17,10 +17,12 @@ from app.models import (
     OwnerScope,
     Organisation,
     OrganisationType,
+    ReportChannel,
     ResponsibilityStage,
     User,
     UserRole,
 )
+from app.services.catalog import location_label
 from app.services.passwords import hash_password, verify_password
 from app.services.projections import sync_job_status_from_events
 from app.services.workflow import append_event
@@ -75,6 +77,7 @@ class DemoJob:
     description: str
     creator_email: str
     location_name: str
+    intake_channel: ReportChannel = ReportChannel.resident_portal
     asset_name: str | None = None
     location_detail_text: str | None = None
     events: tuple[DemoJobEvent, ...] = ()
@@ -340,6 +343,66 @@ DEMO_USER_EMAILS = {demo.email for demo in DEMO_USERS}
 
 DEMO_JOBS: tuple[DemoJob, ...] = (
     DemoJob(
+        title="Shower mixer leak after first repair",
+        description="The Block A Room 14 shower mixer leaked around the trim after an earlier washer replacement and needed a return visit.",
+        creator_email="resident@fixhub.test",
+        location_name="Block A Room 14",
+        asset_name="Tap",
+        location_detail_text="Ensuite shower wall closest to the vanity",
+        events=(
+            DemoJobEvent(
+                actor_email="coordinator@fixhub.test",
+                message="Assigned Maddie Maintenance Technician",
+                event_type=EventType.assignment,
+                responsibility_stage=ResponsibilityStage.triage,
+                owner_scope=OwnerScope.user,
+                assigned_org_name="Campus Maintenance",
+                assigned_contractor_email="maintenance.contractor@fixhub.test",
+            ),
+            DemoJobEvent(
+                actor_email="coordinator@fixhub.test",
+                message="Dispatch target selected; job moved to assigned",
+                event_type=EventType.status_change,
+                target_status=JobStatus.assigned,
+                responsibility_stage=ResponsibilityStage.triage,
+                owner_scope=OwnerScope.user,
+                assigned_org_name="Campus Maintenance",
+                assigned_contractor_email="maintenance.contractor@fixhub.test",
+            ),
+            DemoJobEvent(
+                actor_email="triage@fixhub.test",
+                message="Reviewed the repeat leak and confirmed a return visit was needed.",
+                event_type=EventType.status_change,
+                target_status=JobStatus.triaged,
+                responsibility_stage=ResponsibilityStage.triage,
+                owner_scope=OwnerScope.user,
+            ),
+            DemoJobEvent(
+                actor_email="triage@fixhub.test",
+                message="Booked maintenance for an afternoon access window confirmed by the resident.",
+                event_type=EventType.schedule,
+                target_status=JobStatus.scheduled,
+                responsibility_stage=ResponsibilityStage.coordination,
+                owner_scope=OwnerScope.user,
+            ),
+            DemoJobEvent(
+                actor_email="maintenance.contractor@fixhub.test",
+                message="Replaced the shower cartridge, resealed the trim, and pressure-tested the mixer.",
+                event_type=EventType.completion,
+                target_status=JobStatus.completed,
+                responsibility_stage=ResponsibilityStage.execution,
+                owner_scope=OwnerScope.user,
+            ),
+            DemoJobEvent(
+                actor_email="resident@fixhub.test",
+                message="The shower stayed dry for the rest of the week after the return visit.",
+                reason_code="resident_confirmed_resolved",
+                responsibility_stage=ResponsibilityStage.execution,
+                owner_scope=OwnerScope.user,
+            ),
+        ),
+    ),
+    DemoJob(
         title="Shower mixer leaking again",
         description="Water is tracking under the shower mixer again after the last repair, and the resident can only provide access after classes.",
         creator_email="resident@fixhub.test",
@@ -388,6 +451,58 @@ DEMO_JOBS: tuple[DemoJob, ...] = (
                 target_status=JobStatus.scheduled,
                 responsibility_stage=ResponsibilityStage.coordination,
                 owner_scope=OwnerScope.user,
+            ),
+        ),
+    ),
+    DemoJob(
+        title="Laundry pump stopped mid-cycle last week",
+        description="The Block B laundry pump stopped during several wash cycles last week and required a prior plumber attendance before the current breakdown.",
+        creator_email="resident.blockb@fixhub.test",
+        location_name="Block B Laundry",
+        intake_channel=ReportChannel.staff_created,
+        asset_name="Pump",
+        location_detail_text="Rear wall machine bank closest to the floor drain",
+        events=(
+            DemoJobEvent(
+                actor_email="coordinator@fixhub.test",
+                message="Assigned Newcastle Plumbing",
+                event_type=EventType.assignment,
+                responsibility_stage=ResponsibilityStage.triage,
+                owner_scope=OwnerScope.organisation,
+                assigned_org_name="Newcastle Plumbing",
+            ),
+            DemoJobEvent(
+                actor_email="coordinator@fixhub.test",
+                message="Dispatch target selected; job moved to assigned",
+                event_type=EventType.status_change,
+                target_status=JobStatus.assigned,
+                responsibility_stage=ResponsibilityStage.triage,
+                owner_scope=OwnerScope.organisation,
+                assigned_org_name="Newcastle Plumbing",
+            ),
+            DemoJobEvent(
+                actor_email="triage@fixhub.test",
+                message="Confirmed plumber attendance for repeated pump stoppages in the laundry.",
+                event_type=EventType.status_change,
+                target_status=JobStatus.triaged,
+                responsibility_stage=ResponsibilityStage.triage,
+                owner_scope=OwnerScope.organisation,
+            ),
+            DemoJobEvent(
+                actor_email="triage@fixhub.test",
+                message="Booked plumber after site staff confirmed plant room access.",
+                event_type=EventType.schedule,
+                target_status=JobStatus.scheduled,
+                responsibility_stage=ResponsibilityStage.coordination,
+                owner_scope=OwnerScope.organisation,
+            ),
+            DemoJobEvent(
+                actor_email="contractor@fixhub.test",
+                message="Cleared the jammed float switch, tested multiple cycles, and restored normal drainage.",
+                event_type=EventType.completion,
+                target_status=JobStatus.completed,
+                responsibility_stage=ResponsibilityStage.execution,
+                owner_scope=OwnerScope.organisation,
             ),
         ),
     ),
@@ -460,6 +575,58 @@ DEMO_JOBS: tuple[DemoJob, ...] = (
         ),
     ),
     DemoJob(
+        title="Common room heater reset after earlier trip",
+        description="The Block A common room heater had already needed one earlier reset before the latest overnight trip was reported.",
+        creator_email="resident.common@fixhub.test",
+        location_name="Block A Common Room",
+        intake_channel=ReportChannel.inspection_housekeeping,
+        asset_name="Heater",
+        location_detail_text="North wall heater beside the noticeboard",
+        events=(
+            DemoJobEvent(
+                actor_email="coordinator@fixhub.test",
+                message="Assigned Campus Maintenance",
+                event_type=EventType.assignment,
+                responsibility_stage=ResponsibilityStage.triage,
+                owner_scope=OwnerScope.organisation,
+                assigned_org_name="Campus Maintenance",
+            ),
+            DemoJobEvent(
+                actor_email="coordinator@fixhub.test",
+                message="Dispatch target selected; job moved to assigned",
+                event_type=EventType.status_change,
+                target_status=JobStatus.assigned,
+                responsibility_stage=ResponsibilityStage.triage,
+                owner_scope=OwnerScope.organisation,
+                assigned_org_name="Campus Maintenance",
+            ),
+            DemoJobEvent(
+                actor_email="triage@fixhub.test",
+                message="Recorded an earlier overnight heater trip and sent campus maintenance to inspect.",
+                event_type=EventType.status_change,
+                target_status=JobStatus.triaged,
+                responsibility_stage=ResponsibilityStage.triage,
+                owner_scope=OwnerScope.organisation,
+            ),
+            DemoJobEvent(
+                actor_email="triage@fixhub.test",
+                message="Booked an evening heater check while the common room was quiet.",
+                event_type=EventType.schedule,
+                target_status=JobStatus.scheduled,
+                responsibility_stage=ResponsibilityStage.coordination,
+                owner_scope=OwnerScope.organisation,
+            ),
+            DemoJobEvent(
+                actor_email="maintenance.contractor@fixhub.test",
+                message="Reset the heater, tightened the loose terminal cover, and confirmed heat output on departure.",
+                event_type=EventType.completion,
+                target_status=JobStatus.completed,
+                responsibility_stage=ResponsibilityStage.execution,
+                owner_scope=OwnerScope.organisation,
+            ),
+        ),
+    ),
+    DemoJob(
         title="Common room heater tripping overnight",
         description="The Block A common room heater is dropping out overnight again after a prior visit, so residents wake up to a cold room.",
         creator_email="resident.common@fixhub.test",
@@ -519,6 +686,65 @@ DEMO_JOBS: tuple[DemoJob, ...] = (
             ),
         ),
     ),
+    DemoJob(
+        title="Bathroom fan rattling after reset",
+        description="The bathroom fan in Block B Room 8 kept rattling after an earlier reset, but this latest attendance appears to have resolved it.",
+        creator_email="resident.blockb@fixhub.test",
+        location_name="Block B Room 8",
+        intake_channel=ReportChannel.security_after_hours,
+        asset_name="Bathroom Fan",
+        location_detail_text="Ceiling fan above the shower",
+        events=(
+            DemoJobEvent(
+                actor_email="coordinator@fixhub.test",
+                message="Assigned Campus Maintenance",
+                event_type=EventType.assignment,
+                responsibility_stage=ResponsibilityStage.triage,
+                owner_scope=OwnerScope.user,
+                assigned_org_name="Campus Maintenance",
+            ),
+            DemoJobEvent(
+                actor_email="coordinator@fixhub.test",
+                message="Dispatch target selected; job moved to assigned",
+                event_type=EventType.status_change,
+                target_status=JobStatus.assigned,
+                responsibility_stage=ResponsibilityStage.triage,
+                owner_scope=OwnerScope.user,
+                assigned_org_name="Campus Maintenance",
+            ),
+            DemoJobEvent(
+                actor_email="triage@fixhub.test",
+                message="Reviewed repeat noise history and booked maintenance to inspect the fan mount and grille.",
+                event_type=EventType.status_change,
+                target_status=JobStatus.triaged,
+                responsibility_stage=ResponsibilityStage.triage,
+                owner_scope=OwnerScope.user,
+            ),
+            DemoJobEvent(
+                actor_email="triage@fixhub.test",
+                message="Booked Maddie for Thursday 10:00-12:00 while the resident was available.",
+                event_type=EventType.schedule,
+                target_status=JobStatus.scheduled,
+                responsibility_stage=ResponsibilityStage.coordination,
+                owner_scope=OwnerScope.user,
+            ),
+            DemoJobEvent(
+                actor_email="maintenance.contractor@fixhub.test",
+                message="Tightened the loose fan grille, cleaned the housing, and tested the fan through a full run cycle.",
+                event_type=EventType.completion,
+                target_status=JobStatus.completed,
+                responsibility_stage=ResponsibilityStage.execution,
+                owner_scope=OwnerScope.user,
+            ),
+            DemoJobEvent(
+                actor_email="resident.blockb@fixhub.test",
+                message="The fan has been quiet since yesterday's visit and is working normally again.",
+                reason_code="resident_confirmed_resolved",
+                responsibility_stage=ResponsibilityStage.execution,
+                owner_scope=OwnerScope.user,
+            ),
+        ),
+    ),
 )
 
 
@@ -540,6 +766,22 @@ def _set_job_assignment(
     job.assigned_contractor_user_id = assigned_contractor.id if assigned_contractor is not None else None
 
 
+def _report_created_message(seeded_job: DemoJob, reported_for_user: User) -> str:
+    if seeded_job.intake_channel == ReportChannel.resident_portal:
+        return "Resident reported the issue through the portal."
+    if seeded_job.intake_channel == ReportChannel.staff_created:
+        return f"Fran Front Desk logged this issue on behalf of {reported_for_user.name}."
+    if seeded_job.intake_channel == ReportChannel.security_after_hours:
+        return f"Fran Front Desk logged this issue through the after-hours support path for {reported_for_user.name}."
+    return "Fran Front Desk logged this issue from an inspection or housekeeping round."
+
+
+def _report_created_actor(seeded_job: DemoJob, reported_for_user: User, users: dict[str, User]) -> User:
+    if seeded_job.intake_channel == ReportChannel.resident_portal:
+        return reported_for_user
+    return users["reception@fixhub.test"]
+
+
 def _ensure_demo_jobs(
     session: Session,
     *,
@@ -549,12 +791,13 @@ def _ensure_demo_jobs(
     assets: dict[tuple[str, str], Asset],
 ) -> None:
     for seeded_job in DEMO_JOBS:
-        creator = users[seeded_job.creator_email]
+        reported_for_user = users[seeded_job.creator_email]
         location = locations[seeded_job.location_name]
+        creator = _report_created_actor(seeded_job, reported_for_user, users)
         existing = session.scalar(
             select(Job)
             .where(
-                Job.created_by == creator.id,
+                Job.reported_for_user_id == reported_for_user.id,
                 Job.location_id == location.id,
                 Job.title == seeded_job.title,
             )
@@ -567,13 +810,15 @@ def _ensure_demo_jobs(
         job = Job(
             title=seeded_job.title,
             description=seeded_job.description,
-            organisation_id=creator.organisation_id,
-            location_snapshot=location.name,
+            organisation_id=reported_for_user.organisation_id,
+            location_snapshot=location_label(location),
+            asset_snapshot=asset.name if asset is not None else None,
             location_detail_text=seeded_job.location_detail_text,
             location_id=location.id,
             asset_id=asset.id if asset is not None else None,
             status=JobStatus.new,
             created_by=creator.id,
+            reported_for_user_id=reported_for_user.id,
         )
         session.add(job)
         session.flush()
@@ -582,9 +827,10 @@ def _ensure_demo_jobs(
             session,
             job=job,
             actor=creator,
-            message="Report created",
+            message=_report_created_message(seeded_job, reported_for_user),
             event_type=EventType.report_created,
             target_status=JobStatus.new,
+            reason_code=seeded_job.intake_channel.value,
             responsibility_stage=ResponsibilityStage.reception,
             owner_scope=OwnerScope.user,
         )

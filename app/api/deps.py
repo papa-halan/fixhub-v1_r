@@ -18,6 +18,7 @@ from app.models import (
     JobStatus,
     Organisation,
     OrganisationType,
+    ReportChannel,
     User,
     UserRole,
 )
@@ -67,6 +68,22 @@ class OperationalHistoryProjection:
     open_job_count: int
 
 
+@dataclass(frozen=True)
+class ReportIntakeProjection:
+    channel: str | None
+    channel_label: str | None
+    summary: str | None
+    actor_label: str | None
+
+
+REPORT_CHANNEL_LABELS = {
+    ReportChannel.resident_portal.value: "Resident portal",
+    ReportChannel.staff_created.value: "Staff-created",
+    ReportChannel.security_after_hours.value: "After-hours support",
+    ReportChannel.inspection_housekeeping.value: "Inspection or housekeeping",
+}
+
+
 def get_session(request: Request):
     session = request.app.state.SessionLocal()
     try:
@@ -91,6 +108,7 @@ def job_query():
         select(Job)
         .options(
             joinedload(Job.creator).joinedload(User.organisation),
+            joinedload(Job.reported_for_user).joinedload(User.organisation),
             joinedload(Job.organisation),
             joinedload(Job.location),
             joinedload(Job.asset),
@@ -174,11 +192,16 @@ def navigation_for(user: User) -> list[dict[str, str]]:
             {"label": "My Reports", "href": "/resident/jobs"},
         ]
     if user.role in OPERATIONS_ROLES:
-        return [{"label": "Operations Queue", "href": "/admin/jobs"}]
+        return [
+            {"label": "Operations Queue", "href": "/admin/jobs"},
+            {"label": "Log Intake", "href": "/admin/report"},
+        ]
     return [{"label": "Assigned Work", "href": "/contractor/jobs"}]
 
 
 def actor_name(event: Event) -> str:
+    if event.actor_name_snapshot:
+        return event.actor_name_snapshot
     if event.actor_user:
         return event.actor_user.name
     if event.actor_org:
@@ -187,18 +210,24 @@ def actor_name(event: Event) -> str:
 
 
 def actor_role_value(event: Event) -> str | None:
+    if event.actor_role_snapshot:
+        return event.actor_role_snapshot
     if event.actor_user:
         return event.actor_user.role.value
     return None
 
 
 def actor_role_label(event: Event) -> str | None:
+    if event.actor_role_snapshot:
+        return role_label(event.actor_role_snapshot)
     if event.actor_user:
         return user_role_label(event.actor_user)
     return role_label(actor_role_value(event))
 
 
 def organisation_name(event: Event) -> str | None:
+    if event.actor_org_name_snapshot:
+        return event.actor_org_name_snapshot
     if event.actor_user and event.actor_user.organisation:
         return event.actor_user.organisation.name
     if event.actor_org:
@@ -242,12 +271,25 @@ def job_location_name(job: Job) -> str:
 
 
 def job_asset_name(job: Job) -> str | None:
+    if job.asset_snapshot:
+        return job.asset_snapshot
     if job.asset:
         return job.asset.name
     return None
 
 
+def job_reported_for_name(job: Job) -> str:
+    reported_for_user = getattr(job, "reported_for_user", None)
+    if reported_for_user is not None:
+        return reported_for_user.name
+    creator = getattr(job, "creator", None)
+    if creator is not None:
+        return creator.name
+    return "Resident"
+
+
 def serialize_job(job: Job) -> dict[str, object]:
+    intake = derive_report_intake(job)
     assignment = derive_assignment_projection(job, job.events)
     projection = derive_coordination_projection(job, job.events)
     pending_signal = derive_pending_signal(job, job.events)
@@ -290,6 +332,12 @@ def serialize_job(job: Job) -> dict[str, object]:
         "owner_scope": projection.owner_scope,
         "created_by": job.created_by,
         "created_by_name": job.creator.name,
+        "reported_for_user_id": job.reported_for_user_id,
+        "reported_for_user_name": job_reported_for_name(job),
+        "intake_channel": intake.channel,
+        "intake_channel_label": intake.channel_label,
+        "intake_summary": intake.summary,
+        "reported_by_actor_label": intake.actor_label,
         "responsibility_owner": projection.responsibility_owner,
         "assigned_org_id": assignment.assigned_org_id,
         "assigned_org_name": assignment.assigned_org_name,
@@ -353,7 +401,33 @@ def serialize_job(job: Job) -> dict[str, object]:
     }
 
 
+def serialize_job_for_user(
+    session: Session,
+    user: User,
+    *,
+    job: Job,
+    include_history: bool = True,
+) -> dict[str, object]:
+    payload = serialize_job(job)
+    if not include_history:
+        return payload
+
+    history = operational_history_for_user(session, user, job=job)
+    payload.update(
+        {
+            "operational_history_headline": history.headline,
+            "operational_history_summary": history.summary,
+            "operational_history_location_job_count": history.location_job_count,
+            "operational_history_asset_job_count": history.asset_job_count,
+            "operational_history_open_job_count": history.open_job_count,
+        }
+    )
+    return payload
+
+
 def event_location_name(event: Event) -> str | None:
+    if event.location_snapshot:
+        return event.location_snapshot
     if event.location_record:
         if event.job and event.job.location_snapshot:
             return event.job.location_snapshot
@@ -364,6 +438,8 @@ def event_location_name(event: Event) -> str | None:
 
 
 def event_asset_name(event: Event) -> str | None:
+    if event.asset_snapshot:
+        return event.asset_snapshot
     if event.asset:
         return event.asset.name
     if event.job:
@@ -387,9 +463,11 @@ def serialize_event(event: Event) -> dict[str, object]:
         "actor_role_label": actor_role_label(event),
         "organisation_name": organisation_name(event),
         "assigned_org_id": event.assigned_org_id,
-        "assigned_org_name": event.assigned_org.name if event.assigned_org else None,
+        "assigned_org_name": event.assigned_org_name_snapshot
+        or (event.assigned_org.name if event.assigned_org else None),
         "assigned_contractor_user_id": event.assigned_contractor_user_id,
-        "assigned_contractor_name": event.assigned_contractor.name if event.assigned_contractor else None,
+        "assigned_contractor_name": event.assigned_contractor_name_snapshot
+        or (event.assigned_contractor.name if event.assigned_contractor else None),
         "actor_label": actor_label(event),
         "event_type": event.event_type.value,
         "target_status": event.target_status.value if event.target_status else None,
@@ -420,6 +498,35 @@ def build_job_counts(jobs: list[dict[str, object]]) -> dict[str, int]:
     return counts
 
 
+VISIT_PLAN_ATTENTION_HEADLINES = {
+    "Attendance planning not recorded yet",
+    "Attendance still needs a booked visit",
+    "Access arrangement is not ready for the next visit",
+    "Resident access note is newer than the booked visit",
+}
+
+
+def build_focus_counts(jobs: list[dict[str, object]]) -> dict[str, int]:
+    return {
+        "response_needed": len([job for job in jobs if job.get("pending_signal_at") is not None]),
+        "visit_attention": len(
+            [
+                job
+                for job in jobs
+                if job.get("visit_plan_headline") in VISIT_PLAN_ATTENTION_HEADLINES
+            ]
+        ),
+        "repeat_open_work": len(
+            [
+                job
+                for job in jobs
+                if int(job.get("operational_history_open_job_count") or 0) > 0
+            ]
+        ),
+        "blocked": len([job for job in jobs if job.get("status") == JobStatus.blocked.value]),
+    }
+
+
 def serialize_related_job(job: Job, *, current_job: Job) -> dict[str, object]:
     projection = derive_coordination_projection(job, job.events)
     return {
@@ -428,7 +535,7 @@ def serialize_related_job(job: Job, *, current_job: Job) -> dict[str, object]:
         "status": projection.status.value,
         "status_label": status_label(projection.status),
         "coordination_headline": projection.headline,
-        "created_by_name": job.creator.name,
+        "reported_for_user_name": job_reported_for_name(job),
         "created_at": job.created_at,
         "updated_at": job.updated_at,
         "match_label": (
@@ -437,6 +544,46 @@ def serialize_related_job(job: Job, *, current_job: Job) -> dict[str, object]:
             else "Same location"
         ),
     }
+
+
+def report_created_event(job: Job) -> Event | None:
+    for event in job.events:
+        if event.event_type.value == "report_created":
+            return event
+    return None
+
+
+def derive_report_intake(job: Job) -> ReportIntakeProjection:
+    report_event = report_created_event(job)
+    if report_event is None:
+        return ReportIntakeProjection(
+            channel=None,
+            channel_label=None,
+            summary=None,
+            actor_label=None,
+        )
+
+    channel = report_event.reason_code
+    actor = actor_label(report_event)
+    reported_for_name = job_reported_for_name(job)
+    channel_label = REPORT_CHANNEL_LABELS.get(channel, "Reported")
+    if channel == ReportChannel.resident_portal.value:
+        summary = f"{reported_for_name} reported this issue through the resident portal."
+    elif channel == ReportChannel.staff_created.value:
+        summary = f"{actor} logged this issue on behalf of {reported_for_name}."
+    elif channel == ReportChannel.security_after_hours.value:
+        summary = f"{actor} logged this issue through the after-hours path for {reported_for_name}."
+    elif channel == ReportChannel.inspection_housekeeping.value:
+        summary = f"{actor} logged this issue from an inspection or housekeeping round."
+    else:
+        summary = report_event.message
+
+    return ReportIntakeProjection(
+        channel=channel,
+        channel_label=channel_label,
+        summary=summary,
+        actor_label=actor,
+    )
 
 
 def contractor_has_current_assignment(job: Job, user: User) -> bool:
@@ -468,7 +615,11 @@ def can_view_job(job: Job, user: User) -> bool:
     if user.role in OPERATIONS_ROLES:
         return bool(user.organisation_id and job.organisation_id == user.organisation_id)
     if user.role == UserRole.resident:
-        return bool(user.organisation_id and job.created_by == user.id and job.organisation_id == user.organisation_id)
+        return bool(
+            user.organisation_id
+            and job.reported_for_user_id == user.id
+            and job.organisation_id == user.organisation_id
+        )
     if user.role != UserRole.contractor:
         return False
     return contractor_can_view_job(job, user)
@@ -503,7 +654,7 @@ def visible_jobs(
     elif mine or user.role == UserRole.resident:
         if user.organisation_id is None:
             return []
-        stmt = stmt.where(Job.created_by == user.id, Job.organisation_id == user.organisation_id)
+        stmt = stmt.where(Job.reported_for_user_id == user.id, Job.organisation_id == user.organisation_id)
     else:
         jobs = list(session.scalars(stmt))
         visible = [job for job in jobs if contractor_can_view_job(job, user)]
@@ -563,6 +714,19 @@ def operational_history_for_user(
         if job.asset_id is not None
         else 0
     )
+    open_asset_job_count = (
+        len(
+            [
+                candidate
+                for candidate in related_jobs
+                if job.asset_id is not None
+                and candidate.asset_id == job.asset_id
+                and derive_coordination_projection(candidate, candidate.events).status not in RESOLVED_JOB_STATUSES
+            ]
+        )
+        if job.asset_id is not None
+        else 0
+    )
     open_job_count = len(
         [
             candidate
@@ -573,8 +737,8 @@ def operational_history_for_user(
 
     if location_job_count == 0:
         return OperationalHistoryProjection(
-            headline="No earlier visible operational history at this location",
-            summary="This is the first visible record here, so future coordination will start from this timeline.",
+            headline="No other visible operational history at this location",
+            summary="This is the only visible record here so far, so coordination will start from this timeline.",
             location_job_count=0,
             asset_job_count=0,
             open_job_count=0,
@@ -583,23 +747,26 @@ def operational_history_for_user(
     latest_related = related_jobs[0]
     latest_related_projection = derive_coordination_projection(latest_related, latest_related.events)
     if asset_job_count > 0:
-        headline = "Earlier work exists on this asset"
+        headline = "Repeat issue risk on this asset"
     else:
-        headline = "Earlier work exists at this location"
+        headline = "Repeat issue risk at this location"
 
     if job.asset_id is not None:
-        scope_summary = f"{location_job_count} earlier visible job(s) here, including {asset_job_count} on this asset"
+        scope_summary = (
+            f"{location_job_count} other visible job(s) here, including {asset_job_count} on this asset. "
+            f"{open_asset_job_count} related asset job(s) are still open."
+        )
     else:
         scope_summary = (
-            f"{location_job_count} earlier visible job(s) here; this job has no asset selected so repeat checks stay "
+            f"{location_job_count} other visible job(s) here; this job has no asset selected so repeat checks stay "
             "location-based"
         )
 
     return OperationalHistoryProjection(
         headline=headline,
         summary=(
-            f"{scope_summary}. {open_job_count} related job(s) are still open. "
-            f"Latest earlier record: {latest_related.title} ({status_label(latest_related_projection.status)})."
+            f"{scope_summary} {open_job_count} related job(s) are still open. "
+            f"Latest related record: {latest_related.title} ({status_label(latest_related_projection.status)})."
         ),
         location_job_count=location_job_count,
         asset_job_count=asset_job_count,
@@ -613,18 +780,7 @@ def serialize_job_with_history(
     *,
     job: Job,
 ) -> dict[str, object]:
-    payload = serialize_job(job)
-    history = operational_history_for_user(session, user, job=job)
-    payload.update(
-        {
-            "operational_history_headline": history.headline,
-            "operational_history_summary": history.summary,
-            "operational_history_location_job_count": history.location_job_count,
-            "operational_history_asset_job_count": history.asset_job_count,
-            "operational_history_open_job_count": history.open_job_count,
-        }
-    )
-    return payload
+    return serialize_job_for_user(session, user, job=job, include_history=True)
 
 
 def render_page(
@@ -708,6 +864,27 @@ def list_contractor_users(session: Session, *, include_demo: bool) -> list[dict[
             "name": user.name,
             "organisation_id": user.organisation_id,
             "organisation_name": user.organisation.name if user.organisation else None,
+        }
+        for user in session.scalars(stmt)
+    ]
+
+
+def list_resident_users(session: Session, *, organisation_id, include_demo: bool) -> list[dict[str, object]]:
+    stmt = (
+        select(User)
+        .where(
+            User.role == UserRole.resident,
+            User.organisation_id == organisation_id,
+        )
+        .order_by(User.name.asc())
+    )
+    if not include_demo:
+        stmt = stmt.where(User.is_demo_account.is_(False))
+    return [
+        {
+            "id": user.id,
+            "name": user.name,
+            "email": user.email,
         }
         for user in session.scalars(stmt)
     ]

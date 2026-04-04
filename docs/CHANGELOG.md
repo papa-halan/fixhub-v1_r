@@ -2,9 +2,58 @@
 
 ## Document Metadata
 
-- Owner: `student-living-platform`
+- Owner: `fixhub-pilot`
 - Reviewer: `schema-test-automation`
 - Status: `active`
+
+## [0.6.16] - 2026-04-04 22:42:00 +11:00
+
+### Changed
+- operations can now create a job on behalf of a resident through a structured intake channel instead of forcing every report to look like direct resident self-service
+- `report_created` events now carry intake provenance that distinguishes resident portal, staff-created, after-hours, and inspection / housekeeping entry paths
+- queue and detail views now show who logged the job and how it entered the workflow, so staff, residents, and contractors can read a truer intake record
+
+### Notes
+- this run improved pilot intake realism and reduced a misleading demo-era assumption without widening the current job/event model
+
+## [0.6.14] - 2026-04-04 21:18:00 +11:00
+
+### Changed
+- resident updates now require an explicit structured reason code instead of allowing ambiguous free-form "general" notes
+- post-visit resident signals are constrained to plausible lifecycle states, so confirmation and recurrence cannot be recorded before a completion/follow-up path exists
+- the resident job page now only offers update types that match the current lifecycle state
+
+### Notes
+- this run tightened pilot truth around resident-to-operations coordination without widening the current job/event model
+
+## [0.6.16] - 2026-04-04 22:30:00 +11:00
+
+### Changed
+- job-level assignment projection now prefers the latest assignment-event name snapshots over live organisation/user rows, so current dispatch labels stay aligned with the recorded handoff after later renames
+- added regression coverage for resident and operations reads when contractor organisation or named field-worker rows are renamed after assignment
+
+### Notes
+- this run corrected a timeline-truth gap in the existing event-backed dispatch model instead of adding new workflow surface
+
+## [0.6.15] - 2026-04-04 22:05:00 +11:00
+
+### Changed
+- `scheduled` and `follow_up_scheduled` lifecycle events now default to `responsibility_owner=triage_officer` instead of `contractor`, so pre-attendance work stays stamped as operations-owned coordination
+- added regression coverage to keep pre-attendance ownership aligned with the event model and resident-facing workflow
+- updated architecture and schema assessment docs to describe contractor ownership beginning at recorded attendance rather than booking
+
+### Notes
+- this run removed a misleading ownership shortcut without expanding the current Phase 0.5 job/event shape
+
+## [0.6.13] - 2026-04-04 21:10:00 +11:00
+
+### Changed
+- resident access updates now record `responsibility_owner=coordinator` so booked-access changes land with the coordination role instead of being mis-stamped as triage work
+- repo-facing wording now describes FixHub as a civil-works coordination platform being approached through a constrained residence-operations pilot
+- package metadata and UI tagline were tightened to remove leftover "minimal MVP" framing
+
+### Notes
+- this run kept the current event-backed job model and corrected operational ownership plus repo honesty rather than broadening scope
 
 ## [0.6.12] - 2026-04-04 20:05:00 +11:00
 
@@ -51,9 +100,10 @@
 ### Changed
 - resident location selection now shows structured hierarchy labels instead of bare child-location names
 - new jobs store the full hierarchical `location_snapshot`, and job/event reads now prefer that stored snapshot over the mutable current location row
+- asset-linked jobs now store `asset_snapshot`, and job/event reads preserve that stored asset label after later catalog renames
 
 ### Notes
-- this run tightened truthful location context without changing auth, seed, or the existing structured location-id workflow
+- this run tightened truthful location and asset context without changing auth, seed, or the existing structured location-id workflow
 
 ## [0.6.7] - 2026-04-04 17:10:00 +11:00
 

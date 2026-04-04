@@ -34,6 +34,18 @@
         <span>Location</span>
         <strong>{{ job.location }}</strong>
       </div>
+      {% if job.intake_channel_label %}
+      <div class="meta-item">
+        <span>How this was logged</span>
+        <strong>{{ job.intake_channel_label }}</strong>
+      </div>
+      {% endif %}
+      {% if job.intake_summary %}
+      <div class="meta-item">
+        <span>Intake summary</span>
+        <strong>{{ job.intake_summary }}</strong>
+      </div>
+      {% endif %}
       {% if job.location_detail_text %}
       <div class="meta-item">
         <span>Location detail</span>
@@ -90,17 +102,27 @@
       </div>
   </article>
 
-  <article class="panel">
-    <div class="panel-header">
-      <h2>Latest team updates</h2>
-      <p>Use these before calling or chasing email for the current handoff.</p>
-    </div>
-    <div class="meta-list">
-      <div class="meta-item">
-        <span>Staff update</span>
-        <strong>
-          {% if job.latest_operations_update_at %}
-          {{ job.latest_operations_update_message }}{% if job.latest_operations_update_actor_label %} ({{ job.latest_operations_update_actor_label }}){% endif %} at {{ job.latest_operations_update_at|timestamp }}
+    <article class="panel">
+      <div class="panel-header">
+        <h2>Shared progress updates</h2>
+        <p>Use the latest resident, staff, and field updates before chasing side channels.</p>
+      </div>
+      <div class="meta-list">
+        <div class="meta-item">
+          <span>Your latest update</span>
+          <strong>
+            {% if job.latest_resident_update_at %}
+            {{ job.latest_resident_update_message }}{% if job.latest_resident_update_actor_label %} ({{ job.latest_resident_update_actor_label }}){% endif %} at {{ job.latest_resident_update_at|timestamp }}
+            {% else %}
+            No resident update yet
+            {% endif %}
+          </strong>
+        </div>
+        <div class="meta-item">
+          <span>Staff update</span>
+          <strong>
+            {% if job.latest_operations_update_at %}
+            {{ job.latest_operations_update_message }}{% if job.latest_operations_update_actor_label %} ({{ job.latest_operations_update_actor_label }}){% endif %} at {{ job.latest_operations_update_at|timestamp }}
           {% else %}
           No staff update yet
           {% endif %}
@@ -134,6 +156,47 @@
         <span>What to do with it</span>
         <strong>{{ job.pending_signal_summary }}</strong>
       </div>
+    </div>
+  </article>
+  {% endif %}
+
+  {% if job.visit_plan_headline %}
+  <article class="panel">
+    <div class="panel-header">
+      <h2>Current visit plan</h2>
+      <p>{{ job.visit_plan_headline }}</p>
+    </div>
+    <div class="meta-list">
+      <div class="meta-item">
+        <span>What this means</span>
+        <strong>{{ job.visit_plan_summary }}</strong>
+      </div>
+      <div class="meta-item">
+        <span>Booked attendance</span>
+        <strong>
+          {% if job.visit_booking_at %}
+          {{ job.visit_booking_message }} at {{ job.visit_booking_at|timestamp }}
+          {% else %}
+          Staff have not recorded a visit time yet
+          {% endif %}
+        </strong>
+      </div>
+      <div class="meta-item">
+        <span>Your latest access note</span>
+        <strong>
+          {% if job.visit_access_at %}
+          {{ job.visit_access_message }} at {{ job.visit_access_at|timestamp }}
+          {% else %}
+          No resident access note recorded yet
+          {% endif %}
+        </strong>
+      </div>
+      {% if job.visit_blocker_at %}
+      <div class="meta-item">
+        <span>Latest visit blocker</span>
+        <strong>{{ job.visit_blocker_message }} at {{ job.visit_blocker_at|timestamp }}</strong>
+      </div>
+      {% endif %}
     </div>
   </article>
   {% endif %}
@@ -177,17 +240,24 @@
       <label>
         Update type
         <select name="reason_code">
-          <option value="">General resident update</option>
+          {% if job.status != "completed" and job.status != "cancelled" %}
           <option value="resident_access_update">Access update</option>
           <option value="resident_access_issue">Access problem</option>
-          <option value="issue_still_present">Issue still present</option>
+          {% endif %}
+          {% if job.status == "completed" or job.status == "follow_up_scheduled" %}
+          <option value="issue_still_present">Issue still present after visit</option>
+          <option value="resident_reported_recurrence">Issue returned after completion</option>
+          {% endif %}
+          {% if job.status == "completed" %}
+          <option value="resident_confirmed_resolved">Issue resolved after visit</option>
+          {% endif %}
         </select>
       </label>
       <label>
         Message
-        <textarea name="message" placeholder="I can give access after 3pm Tuesday, or the issue is still present after yesterday's visit." required></textarea>
+        <textarea name="message" placeholder="I can give access after 3pm Tuesday, or the issue returned after the last completed visit." required></textarea>
       </label>
-      <p class="muted form-helper">Use this when your availability changes, access failed, or the issue returns after a completed visit.</p>
+      <p class="muted form-helper">Use a structured update only when access changes during active coordination, or after completion when you need to confirm the fix or report recurrence.</p>
       <div class="actions">
         <button class="button" type="submit">Send update</button>
       </div>

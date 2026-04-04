@@ -11,7 +11,7 @@ from app.api.deps import (
     get_current_user,
     get_session,
     serialize_event,
-    serialize_job,
+    serialize_job_for_user,
     serialize_job_with_history,
     serialize_user,
     visible_events,
@@ -26,6 +26,7 @@ from app.models import (
     OwnerScope,
     Organisation,
     OrganisationType,
+    ReportChannel,
     ResidentUpdateReason,
     ResponsibilityOwner,
     ResponsibilityStage,
@@ -37,6 +38,7 @@ from app.services.catalog import is_reportable_location, location_label
 from app.services import (
     ASSIGNEE_REQUIRED_STATUSES,
     ASSIGNMENT_ROLES,
+    OPERATIONS_ROLES,
     EventSpec,
     append_event,
     apply_status_change,
@@ -53,6 +55,69 @@ from app.services import (
 
 router = APIRouter(prefix="/api")
 
+POST_VISIT_RESIDENT_UPDATE_REASONS = {
+    ResidentUpdateReason.issue_still_present,
+    ResidentUpdateReason.resident_reported_recurrence,
+    ResidentUpdateReason.resident_confirmed_resolved,
+}
+ACTIVE_COORDINATION_RESIDENT_UPDATE_REASONS = {
+    ResidentUpdateReason.resident_access_update,
+    ResidentUpdateReason.resident_access_issue,
+}
+POST_VISIT_RESIDENT_UPDATE_STATUSES = {JobStatus.completed, JobStatus.follow_up_scheduled}
+ACTIVE_COORDINATION_RESIDENT_UPDATE_BLOCKED_STATUSES = {JobStatus.cancelled, JobStatus.completed}
+OPERATIONS_INTAKE_CHANNELS = {
+    ReportChannel.staff_created,
+    ReportChannel.security_after_hours,
+    ReportChannel.inspection_housekeeping,
+}
+ASSIGNMENT_ENDING_STATUSES = {
+    JobStatus.completed,
+    JobStatus.cancelled,
+    JobStatus.reopened,
+}
+
+
+def report_created_message(*, intake_channel: ReportChannel, current_user: User, reporter: User) -> str:
+    if intake_channel == ReportChannel.resident_portal:
+        return "Resident reported the issue through the portal."
+    if intake_channel == ReportChannel.staff_created:
+        return f"{current_user.name} logged this issue on behalf of {reporter.name}."
+    if intake_channel == ReportChannel.security_after_hours:
+        return f"{current_user.name} logged this issue through the after-hours support path for {reporter.name}."
+    return f"{current_user.name} logged this issue from an inspection or housekeeping round."
+
+
+def validate_resident_update_reason_for_job(*, job: Job, reason_code: ResidentUpdateReason) -> None:
+    current_status = sync_job_status_from_events(job)
+    if reason_code in POST_VISIT_RESIDENT_UPDATE_REASONS:
+        if current_status not in POST_VISIT_RESIDENT_UPDATE_STATUSES:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=(
+                    "Post-visit resident updates are only allowed after completion or while a follow-up visit "
+                    "is already recorded"
+                ),
+            )
+        if (
+            reason_code == ResidentUpdateReason.resident_confirmed_resolved
+            and current_status != JobStatus.completed
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="resident_confirmed_resolved is only allowed after a completion event",
+            )
+        return
+
+    if (
+        reason_code in ACTIVE_COORDINATION_RESIDENT_UPDATE_REASONS
+        and current_status in ACTIVE_COORDINATION_RESIDENT_UPDATE_BLOCKED_STATUSES
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Access updates must be recorded before cancellation or after the job is reopened",
+        )
+
 
 @router.get("/me", response_model=UserRead)
 def api_me(current_user: User = Depends(get_current_user)):
@@ -65,14 +130,54 @@ def create_job(
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ):
-    if current_user.role != UserRole.resident:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only residents can create jobs")
     if current_user.organisation_id is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User must belong to an organisation")
+
+    reporter = current_user
+    intake_channel = payload.intake_channel or ReportChannel.resident_portal
+    if current_user.role == UserRole.resident:
+        if payload.reported_for_user_id is not None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="Residents cannot create jobs on behalf of another user",
+            )
+        if intake_channel != ReportChannel.resident_portal:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="Residents must use intake_channel=resident_portal",
+            )
+    elif current_user.role in OPERATIONS_ROLES:
+        if payload.reported_for_user_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="Operations-created jobs require reported_for_user_id",
+            )
+        reporter = session.get(User, payload.reported_for_user_id)
+        if reporter is None or reporter.role != UserRole.resident:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="reported_for_user_id must be a resident",
+            )
+        if reporter.organisation_id != current_user.organisation_id:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="Resident reporter must belong to the same organisation",
+            )
+        if intake_channel not in OPERATIONS_INTAKE_CHANNELS:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=(
+                    "Operations intake_channel must be one of staff_created, security_after_hours, "
+                    "or inspection_housekeeping"
+                ),
+            )
+    else:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="This role cannot create jobs")
+
     location = session.get(Location, payload.location_id)
     if (
         location is None
-        or location.organisation_id != current_user.organisation_id
+        or location.organisation_id != reporter.organisation_id
         or not is_reportable_location(location)
     ):
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Choose a valid location")
@@ -88,13 +193,15 @@ def create_job(
     job = Job(
         title=clean_text(payload.title, "title"),
         description=clean_text(payload.description, "description"),
-        organisation_id=current_user.organisation_id,
+        organisation_id=reporter.organisation_id,
         location_snapshot=location_label(location),
+        asset_snapshot=asset.name if asset is not None else None,
         location_detail_text=payload.location_detail_text,
         location_id=location.id,
         asset_id=asset.id if asset is not None else None,
         status=JobStatus.new,
         created_by=current_user.id,
+        reported_for_user_id=reporter.id,
     )
     session.add(job)
     session.flush()
@@ -102,14 +209,19 @@ def create_job(
         session,
         job=job,
         actor=current_user,
-        message="Report created",
+        message=report_created_message(
+            intake_channel=intake_channel,
+            current_user=current_user,
+            reporter=reporter,
+        ),
         event_type=EventType.report_created,
         target_status=JobStatus.new,
+        reason_code=intake_channel.value,
         responsibility_stage=ResponsibilityStage.reception,
     )
     sync_job_status_from_events(job)
     session.commit()
-    return serialize_job(visible_job(session, current_user, job.id))
+    return serialize_job_for_user(session, current_user, job=visible_job(session, current_user, job.id))
 
 
 @router.get("/jobs", response_model=list[JobRead])
@@ -119,7 +231,10 @@ def list_jobs(
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ):
-    return [serialize_job(job) for job in visible_jobs(session, current_user, mine=mine, assigned=assigned)]
+    return [
+        serialize_job_for_user(session, current_user, job=job)
+        for job in visible_jobs(session, current_user, mine=mine, assigned=assigned)
+    ]
 
 
 @router.get("/jobs/{job_id}", response_model=JobRead)
@@ -144,7 +259,7 @@ def build_assignment_events(
             EventSpec(
                 message="Assignment cleared",
                 event_type=EventType.assignment,
-                responsibility_stage=ResponsibilityStage.triage,
+                responsibility_stage=ResponsibilityStage.coordination,
                 owner_scope=previous_scope,
                 assigned_org_id=None,
                 assigned_contractor_user_id=None,
@@ -158,13 +273,27 @@ def build_assignment_events(
         EventSpec(
             message=message,
             event_type=EventType.assignment,
-            responsibility_stage=ResponsibilityStage.triage,
+            responsibility_stage=ResponsibilityStage.coordination,
             owner_scope=current_scope,
             assigned_org_id=job.assigned_org_id,
             assigned_contractor_user_id=job.assigned_contractor_user_id,
         )
     )
     return events
+
+
+def build_assignment_end_event(*, job: Job) -> EventSpec | None:
+    if not job_has_assignee(job):
+        return None
+    return EventSpec(
+        message="Assignment cleared",
+        event_type=EventType.assignment,
+        responsibility_stage=ResponsibilityStage.coordination,
+        owner_scope=assignee_scope(job),
+        responsibility_owner=ResponsibilityOwner.coordinator,
+        assigned_org_id=None,
+        assigned_contractor_user_id=None,
+    )
 
 
 def apply_assignment_change(
@@ -323,10 +452,20 @@ def update_job(
         explicit_status_change=explicit_status_change,
     )
 
+    requested_status = changes.get("status")
+    assignment_end_event: EventSpec | None = None
+    if (
+        explicit_status_change
+        and requested_status in ASSIGNMENT_ENDING_STATUSES
+    ):
+        assignment_end_event = build_assignment_end_event(job=job)
+        if assignment_end_event is not None:
+            messages.append(assignment_end_event)
+
     if explicit_status_change:
         status_event = apply_status_change(
             job,
-            changes["status"],
+            requested_status,
             current_user,
             message=transition_event_message,
             reason_code=transition_reason_code,
@@ -353,10 +492,11 @@ def update_job(
             assigned_contractor_user_id=spec.assigned_contractor_user_id,
         )
     if messages:
+        sync_job_assignment_from_events(job)
         sync_job_status_from_events(job)
 
     session.commit()
-    return serialize_job(visible_job(session, current_user, job.id))
+    return serialize_job_for_user(session, current_user, job=visible_job(session, current_user, job.id))
 
 
 @router.get("/jobs/{job_id}/events", response_model=list[EventRead])
@@ -377,14 +517,20 @@ def add_resident_update(
     current_user: User = Depends(get_current_user),
 ):
     job = visible_job(session, current_user, job_id)
+    sync_job_assignment_from_events(job)
+    sync_job_status_from_events(job)
     if current_user.role != UserRole.resident:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only residents can add resident updates")
-    reason_code = payload.reason_code.value if payload.reason_code is not None else None
+    validate_resident_update_reason_for_job(job=job, reason_code=payload.reason_code)
+    reason_code = payload.reason_code.value
     responsibility_stage = ResponsibilityStage.reception
     responsibility_owner = ResponsibilityOwner.reception_admin
     if reason_code == ResidentUpdateReason.resident_access_update.value:
         responsibility_stage = ResponsibilityStage.coordination
-        responsibility_owner = ResponsibilityOwner.triage_officer
+        responsibility_owner = ResponsibilityOwner.coordinator
+    elif reason_code == ResidentUpdateReason.resident_confirmed_resolved.value:
+        responsibility_stage = ResponsibilityStage.execution
+        responsibility_owner = ResponsibilityOwner.resident
     elif reason_code in {
         ResidentUpdateReason.resident_access_issue.value,
         ResidentUpdateReason.issue_still_present.value,
@@ -415,6 +561,8 @@ def add_event(
     current_user: User = Depends(get_current_user),
 ):
     job = visible_job(session, current_user, job_id)
+    sync_job_assignment_from_events(job)
+    sync_job_status_from_events(job)
     if current_user.role == UserRole.resident:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Residents cannot add timeline events")
     if current_user.role == UserRole.contractor and not contractor_has_current_assignment(job, current_user):

@@ -22,6 +22,7 @@ class Job(Base):
     __tablename__ = "jobs"
     __table_args__ = (
         Index("ix_jobs_created_by_created_at", "created_by", "created_at"),
+        Index("ix_jobs_reported_for_created_at", "reported_for_user_id", "created_at"),
         Index("ix_jobs_assigned_org_status", "assigned_org_id", "status"),
         Index("ix_jobs_assigned_contractor_status", "assigned_contractor_user_id", "status"),
         Index("ix_jobs_location_asset", "location_id", "asset_id"),
@@ -31,6 +32,7 @@ class Job(Base):
     title: Mapped[str] = mapped_column(Text, nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)
     location_snapshot: Mapped[str] = mapped_column(Text, nullable=False)
+    asset_snapshot: Mapped[str | None] = mapped_column(Text, nullable=True)
     location_detail_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[JobStatus] = mapped_column(
         Enum(JobStatus, name="job_status_enum", native_enum=False, validate_strings=True),
@@ -39,6 +41,7 @@ class Job(Base):
         server_default=JobStatus.new.value,
     )
     created_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    reported_for_user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
     organisation_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("organisations.id"),
         nullable=False,
@@ -73,6 +76,10 @@ class Job(Base):
     creator: Mapped[User] = relationship(
         back_populates="created_jobs",
         foreign_keys=[created_by],
+    )
+    reported_for_user: Mapped[User] = relationship(
+        back_populates="reported_jobs",
+        foreign_keys=[reported_for_user_id],
     )
     assigned_contractor: Mapped[User | None] = relationship(
         back_populates="direct_assigned_jobs",

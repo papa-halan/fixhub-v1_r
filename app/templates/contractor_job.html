@@ -43,6 +43,18 @@
           <span>Location</span>
           <strong>{{ job.location }}</strong>
         </div>
+        {% if job.intake_channel_label %}
+        <div class="meta-item">
+          <span>Intake channel</span>
+          <strong>{{ job.intake_channel_label }}</strong>
+        </div>
+        {% endif %}
+        {% if job.intake_summary %}
+        <div class="meta-item">
+          <span>Intake summary</span>
+          <strong>{{ job.intake_summary }}</strong>
+        </div>
+        {% endif %}
         {% if job.location_detail_text %}
         <div class="meta-item">
           <span>Location detail</span>
@@ -93,8 +105,8 @@
 
     <section class="panel">
       <div class="panel-header">
-        <h2>Latest handoff context</h2>
-        <p>Check the latest operations and resident signals before attending site.</p>
+        <h2>Shared progress updates</h2>
+        <p>Check the latest operations, resident, and field updates before attending site or posting progress.</p>
       </div>
       <div class="meta-list">
         <div class="meta-item">
@@ -117,6 +129,16 @@
             {% endif %}
           </strong>
         </div>
+        <div class="meta-item">
+          <span>Latest field update</span>
+          <strong>
+            {% if job.latest_contractor_update_at %}
+            {{ job.latest_contractor_update_message }}{% if job.latest_contractor_update_actor_label %} ({{ job.latest_contractor_update_actor_label }}){% endif %} at {{ job.latest_contractor_update_at|timestamp }}
+            {% else %}
+            No field update yet
+            {% endif %}
+          </strong>
+        </div>
       </div>
     </section>
 
@@ -135,6 +157,47 @@
           <span>What to do with it</span>
           <strong>{{ job.pending_signal_summary }}</strong>
         </div>
+      </div>
+    </section>
+    {% endif %}
+
+    {% if job.visit_plan_headline %}
+    <section class="panel">
+      <div class="panel-header">
+        <h2>Current visit plan</h2>
+        <p>{{ job.visit_plan_headline }}</p>
+      </div>
+      <div class="meta-list">
+        <div class="meta-item">
+          <span>Plan check</span>
+          <strong>{{ job.visit_plan_summary }}</strong>
+        </div>
+        <div class="meta-item">
+          <span>Booked attendance</span>
+          <strong>
+            {% if job.visit_booking_at %}
+            {{ job.visit_booking_message }}{% if job.visit_booking_actor_label %} ({{ job.visit_booking_actor_label }}){% endif %} at {{ job.visit_booking_at|timestamp }}
+            {% else %}
+            No booked attendance recorded yet
+            {% endif %}
+          </strong>
+        </div>
+        <div class="meta-item">
+          <span>Resident access signal</span>
+          <strong>
+            {% if job.visit_access_at %}
+            {{ job.visit_access_message }}{% if job.visit_access_actor_label %} ({{ job.visit_access_actor_label }}){% endif %} at {{ job.visit_access_at|timestamp }}
+            {% else %}
+            No resident access note recorded yet
+            {% endif %}
+          </strong>
+        </div>
+        {% if job.visit_blocker_at %}
+        <div class="meta-item">
+          <span>Latest access blocker</span>
+          <strong>{{ job.visit_blocker_message }}{% if job.visit_blocker_actor_label %} ({{ job.visit_blocker_actor_label }}){% endif %} at {{ job.visit_blocker_at|timestamp }}</strong>
+        </div>
+        {% endif %}
       </div>
     </section>
     {% endif %}

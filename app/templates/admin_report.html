@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% block title %}Log Intake | FixHub{% endblock %}
+{% block content %}
+<section class="hero">
+  <div>
+    <p class="eyebrow">Operations</p>
+    <h1>Log intake on behalf of a resident</h1>
+    <p>Use this only when the issue entered through a real staff path such as office-hours intake, after-hours support, or an inspection round.</p>
+  </div>
+  <div class="panel">
+    <h2>Why this matters</h2>
+    <p class="muted">The resident should stay attached as the case owner, while the first timeline event shows who actually logged the issue and which intake channel it came through.</p>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-header">
+    <h2>Log intake</h2>
+    <p>This creates the resident-visible job and records the intake source on the first event.</p>
+  </div>
+  <form id="admin-report-form" class="form-grid" method="post">
+    <label>
+      Resident
+      <select name="reported_for_user_id" {% if not resident_users %}disabled{% endif %} required>
+        <option value="">Choose a resident</option>
+        {% for resident in resident_users %}
+        <option value="{{ resident.id }}">{{ resident.name }} ({{ resident.email }})</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>
+      Intake channel
+      <select name="intake_channel" required>
+        {% for channel in intake_channels %}
+        <option value="{{ channel.value }}">{{ channel.label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>
+      Title
+      <input type="text" name="title" placeholder="Blocked laundry pump" required>
+    </label>
+    <label>
+      Location
+      <select name="location_id" {% if not location_catalog %}disabled{% endif %} required>
+        <option value="">Choose a location</option>
+        {% for location in location_catalog %}
+        <option value="{{ location.id }}">{{ location.label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>
+      Asset
+      <input type="text" name="asset_name" list="admin-asset-options" placeholder="Optional known asset, for example Pump" {% if not location_catalog %}disabled{% endif %}>
+      <datalist id="admin-asset-options"></datalist>
+    </label>
+    <label>
+      Location detail
+      <input type="text" name="location_detail_text" placeholder="Optional access detail, room note, or nearby landmark">
+    </label>
+    <label>
+      Description
+      <textarea name="description" placeholder="Security reported water pooling in the Block B laundry and multiple machines are now stopping mid-cycle." required></textarea>
+    </label>
+    <p class="muted form-helper">Pick the actual intake path instead of writing it as a loose note later. Leave asset blank if the location is known but the exact fixture is not.</p>
+    <div class="actions">
+      <button class="button" type="submit" {% if not resident_users or not location_catalog %}disabled{% endif %}>Create job</button>
+    </div>
+    <p class="feedback" data-feedback></p>
+  </form>
+</section>
+
+<script>
+  const rememberedLocationCatalog = {{ location_catalog | tojson }};
+  const assetOptionsByLocation = Object.fromEntries(
+    rememberedLocationCatalog.map((location) => [
+      location.id,
+      location.assets.map((asset) => asset.name),
+    ])
+  );
+  const locationInput = document.querySelector('[name="location_id"]');
+  const assetInput = document.querySelector('[name="asset_name"]');
+  const assetOptions = document.getElementById("admin-asset-options");
+
+  const renderAssetOptions = () => {
+    const assets = assetOptionsByLocation[locationInput.value] || [];
+    assetOptions.innerHTML = "";
+    assets.forEach((assetName) => {
+      const option = document.createElement("option");
+      option.value = assetName;
+      assetOptions.appendChild(option);
+    });
+    if (assetInput.value && !assets.includes(assetInput.value)) {
+      assetInput.value = "";
+    }
+  };
+
+  locationInput.addEventListener("input", renderAssetOptions);
+  renderAssetOptions();
+
+  FixHub.wireJsonForm(document.getElementById("admin-report-form"), async (formData) => {
+    const job = await FixHub.sendJson("/api/jobs", "POST", {
+      reported_for_user_id: formData.get("reported_for_user_id"),
+      intake_channel: formData.get("intake_channel"),
+      title: formData.get("title"),
+      location_id: formData.get("location_id"),
+      location_detail_text: formData.get("location_detail_text") || null,
+      asset_name: formData.get("asset_name"),
+      description: formData.get("description"),
+    });
+    window.location.href = `/admin/jobs/${job.id}`;
+  });
+</script>
+{% endblock %}

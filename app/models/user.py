@@ -48,6 +48,10 @@ class User(Base):
         back_populates="creator",
         foreign_keys="Job.created_by",
     )
+    reported_jobs: Mapped[list[Job]] = relationship(
+        back_populates="reported_for_user",
+        foreign_keys="Job.reported_for_user_id",
+    )
     direct_assigned_jobs: Mapped[list[Job]] = relationship(
         back_populates="assigned_contractor",
         foreign_keys="Job.assigned_contractor_user_id",

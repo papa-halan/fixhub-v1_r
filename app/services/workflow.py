@@ -79,6 +79,7 @@ REASON_REQUIRED_STATUSES = {
     JobStatus.escalated,
 }
 MESSAGE_REQUIRED_STATUSES = {
+    JobStatus.triaged,
     JobStatus.scheduled,
     JobStatus.in_progress,
     JobStatus.completed,
@@ -102,14 +103,14 @@ DEFAULT_RESPONSIBILITY_OWNER_BY_STATUS = {
     JobStatus.new: ResponsibilityOwner.reception_admin,
     JobStatus.assigned: ResponsibilityOwner.triage_officer,
     JobStatus.triaged: ResponsibilityOwner.triage_officer,
-    JobStatus.scheduled: ResponsibilityOwner.contractor,
+    JobStatus.scheduled: ResponsibilityOwner.triage_officer,
     JobStatus.in_progress: ResponsibilityOwner.contractor,
     JobStatus.on_hold: ResponsibilityOwner.triage_officer,
     JobStatus.blocked: ResponsibilityOwner.coordinator,
     JobStatus.completed: ResponsibilityOwner.resident,
     JobStatus.cancelled: ResponsibilityOwner.coordinator,
     JobStatus.reopened: ResponsibilityOwner.triage_officer,
-    JobStatus.follow_up_scheduled: ResponsibilityOwner.contractor,
+    JobStatus.follow_up_scheduled: ResponsibilityOwner.triage_officer,
     JobStatus.escalated: ResponsibilityOwner.coordinator,
 }
 EVENT_TYPE_BY_STATUS = {
@@ -366,6 +367,22 @@ def append_event(
 ) -> Event:
     touch_job(job)
     assert job.location_id is not None
+    actor_role = getattr(actor.role, "value", actor.role)
+    actor_org_name = getattr(getattr(actor, "organisation", None), "name", None)
+    assigned_org = job.assigned_org
+    assigned_contractor = job.assigned_contractor
+    if assigned_org_id is None:
+        assigned_org_name_snapshot = None
+    elif assigned_org_id is UNSET:
+        assigned_org_name_snapshot = getattr(assigned_org, "name", None)
+    else:
+        assigned_org_name_snapshot = getattr(assigned_org, "name", None)
+    if assigned_contractor_user_id is None:
+        assigned_contractor_name_snapshot = None
+    elif assigned_contractor_user_id is UNSET:
+        assigned_contractor_name_snapshot = getattr(assigned_contractor, "name", None)
+    else:
+        assigned_contractor_name_snapshot = getattr(assigned_contractor, "name", None)
     event = Event(
         job_id=job.id,
         actor_user_id=actor.id,
@@ -376,10 +393,17 @@ def append_event(
             if assigned_contractor_user_id is UNSET
             else assigned_contractor_user_id
         ),
+        actor_name_snapshot=actor.name,
+        actor_role_snapshot=actor_role,
+        actor_org_name_snapshot=actor_org_name,
+        assigned_org_name_snapshot=assigned_org_name_snapshot,
+        assigned_contractor_name_snapshot=assigned_contractor_name_snapshot,
         location_id=job.location_id,
         asset_id=job.asset_id,
         event_type=event_type,
         target_status=target_status,
+        location_snapshot=job.location_snapshot,
+        asset_snapshot=job.asset_snapshot,
         message=message,
         reason_code=reason_code,
         responsibility_stage=responsibility_stage or default_stage_for_actor(actor),

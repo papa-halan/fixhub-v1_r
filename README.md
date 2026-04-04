@@ -1,10 +1,10 @@
 # FixHub Pilot
 
-FixHub is currently a student-living maintenance coordination pilot, not a general maintenance suite or a full civil-works platform.
+FixHub is being built toward a civil-works coordination platform. The implemented repo is still a constrained residence-operations pilot, not a generic maintenance suite and not yet a broader civil-works system.
 
-The implemented core is a shared job timeline across resident -> operations -> contractor actors, with structured location context, auditable lifecycle events, and dispatch that can preserve both the contractor organisation and the named field worker.
+The implemented core is a shared job timeline across resident -> operations -> contractor actors, with structured location context, auditable lifecycle events, dispatch that can preserve both the contractor organisation and the named field worker, and intake records that now distinguish resident-portal reports from staff-mediated entry paths.
 
-This repo is still one constrained pilot wedge. It is strongest where it records who reported work, where it sits, who it was handed to, and how lifecycle updates accumulated over time. It does not yet model the broader civil-works coordination shape such as separate requests, work orders, visits, routing decisions, or public-sector network coordination.
+This repo is one truthful pilot wedge toward that larger goal. It is strongest where it records who reported work, where it sits, who it was handed to, how access and scheduling changed, and how lifecycle updates accumulated over time. It does not yet model the broader civil-works coordination shape such as separate requests, work orders, visits, routing decisions, or public-sector network coordination.
 
 The repository is currently stabilized through Phase 0.5:
 
@@ -73,6 +73,7 @@ erDiagram
         text title
         text description
         text location_snapshot
+        text asset_snapshot
         text location_detail_text
         enum status
         uuid created_by FK
@@ -122,19 +123,21 @@ Reportable operational locations are managed child `space` or `unit` rows. Root-
 
 ## Current Workflow
 
-1. A resident signs in and submits a report against a managed location in their organisation.
+1. A resident can submit a report through the portal, or operations staff can log the issue on the resident's behalf through a structured intake channel such as office-hours staff intake, after-hours support, or inspection / housekeeping rounds.
 2. The report may reference a known asset at that location, but asset capture is optional.
-3. Front desk or operations staff add clarifying notes when needed.
-4. A dispatch coordinator assigns the work to a contractor organisation, and may also name a specific contractor while keeping that contractor organisation attached.
-5. A property manager triages and schedules the job.
-6. Only the currently dispatched contractor or maintenance team sees the job in the active contractor queue; earlier assignees keep read-only historical access on the detail view.
-7. Everyone reads the same shared timeline with stable location context, optional asset context, and assignment snapshots on each event.
+3. The resident remains the visible case owner, while the first `report_created` event records who actually logged the issue and which intake channel it entered through.
+4. Front desk or operations staff add clarifying notes when needed.
+5. A dispatch coordinator assigns the work to a contractor organisation, and may also name a specific contractor while keeping that contractor organisation attached.
+6. A property manager triages and schedules the job.
+7. Only the currently dispatched contractor or maintenance team sees the job in the active contractor queue; earlier assignees keep read-only historical access on the detail view.
+8. Everyone reads the same shared timeline with stable location context, optional asset context, assignment snapshots on each event, and clearer intake provenance for resident-visible jobs.
 
-Job reads keep a stored `location_snapshot` so later location renames do not rewrite the historical record for reports and timeline events. Structured `location_id` remains the relational source of truth for filtering and lookup.
+Job reads keep a stored `location_snapshot` so later location renames do not rewrite the historical record for reports and timeline events. Asset-linked jobs now also keep an `asset_snapshot` so later catalog renames do not silently rewrite earlier operational records. Structured `location_id` and `asset_id` remain the relational source of truth for filtering and lookup.
 
 Timeline events carry both lifecycle intent (`target_status`) and the active assignment target at the time of the update. The `jobs` row still keeps the current assignee and cached status for filtering, but the event stream is the more truthful record of what happened and who the work was pointed at when it happened.
+Current job reads now also derive assignee labels from the latest assignment event snapshot, so later renames of contractor organisations or field workers do not silently rewrite the dispatch record people coordinated from.
 
-Resident updates are intentionally narrow. The pilot accepts only structured resident coordination reasons that operations can act on consistently: `resident_access_update`, `resident_access_issue`, `issue_still_present`, and `resident_reported_recurrence`.
+Resident updates are intentionally narrow. The pilot accepts only structured resident coordination reasons that operations can act on consistently: `resident_access_update`, `resident_access_issue`, `issue_still_present`, `resident_reported_recurrence`, and `resident_confirmed_resolved`. Access reasons are valid only while coordination is still active; post-visit reasons are valid only after completion or during a recorded follow-up cycle.
 
 Supported job states:
 

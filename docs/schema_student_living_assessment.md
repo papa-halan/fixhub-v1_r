@@ -1,10 +1,10 @@
-# Schema Assessment: Student Living Workflow
+# Schema Assessment: Residence Operations Pilot
 
-Date: `2026-04-04 20:05:00 +11:00`
+Date: `2026-04-04 22:42:00 +11:00`
 
 ## Document Metadata
 
-- Owner: `student-living-platform`
+- Owner: `fixhub-pilot`
 - Reviewer: `schema-test-automation`
 - Status: `active`
 
@@ -13,6 +13,7 @@ Date: `2026-04-04 20:05:00 +11:00`
 - `JobStatus` covers `new`, `assigned`, `triaged`, `scheduled`, `in_progress`, `on_hold`, `blocked`, `completed`, `cancelled`, `reopened`, `follow_up_scheduled`, and `escalated`
 - assignment is decoupled from status, and named-contractor dispatch now preserves both `assigned_org_id` and `assigned_contractor_user_id`
 - event records store `event_type`, `target_status`, `reason_code`, `responsibility_stage`, `owner_scope`, and assignment-target snapshots
+- `report_created` events now also carry a structured intake-channel `reason_code`, so the record can distinguish resident portal, staff-created, after-hours, and inspection-origin entry paths without inventing a second intake table yet
 - workflow/status-transition rules live in `app/services/workflow.py`
 - operations roles are split across `reception_admin`, `triage_officer`, and `coordinator`
 - users authenticate via password login plus signed session cookies
@@ -36,16 +37,18 @@ Date: `2026-04-04 20:05:00 +11:00`
 - seeded demo dispatch paths now stay within two credible contractor lanes: external contractor organisations and an internal maintenance team
 - contractor assigned-work queues now represent the current dispatch target only, while historically involved contractors keep read-only timeline visibility
 - role-gated triage and scheduling actions
+- scheduled and follow-up scheduling remain operations-owned coordination states until the contractor actually records attendance
 - resident-visible timelines with structured accountability metadata
 - resident-visible timelines that preserve assignment responsibility on each recorded update
 - resident-visible reads that preserve the original location snapshot even if the managed location label changes later
 - organisation-scoped resident reporting with managed location selection
+- operations-scoped on-behalf intake that keeps the resident attached as the visible case owner while recording which staff path created the job
 - explicit demo-mode auth containment for seeded demo accounts and shortcut switching
 
 ### Role Semantics In The Current UI
 
-- `resident`: submits and tracks their own reports
-- `reception_admin`: front desk / intake role for note-taking and clarification
+- `resident`: submits and tracks their own reports, and remains the visible case owner even when staff log the issue on their behalf
+- `reception_admin`: front desk / intake role for note-taking, clarification, and staff-created intake
 - `triage_officer`: property manager role for triage and scheduling
 - `coordinator`: dispatch coordinator role for assignment and operational rerouting
 - `contractor`: contractor or maintenance technician role for execution updates
@@ -72,7 +75,7 @@ Date: `2026-04-04 20:05:00 +11:00`
 - required runtime verification command: `.\.venv\Scripts\python.exe -m pytest tests\test_schema.py tests\test_migrations.py tests\test_app.py -q`
 - current run execution status: pending in this sandbox until the interpreter can be executed
 - latest recorded successful result in this pass: not yet available from this run
-- runtime coverage in this pass includes migration bootstrap and round-trip smoke, placeholder-location cleanup, startup schema enforcement, browser login behavior, demo gating, org boundary checks, location validation, hierarchy-label rendering, historical location snapshot preservation, lifecycle progression, direct contractor assignment, assignment rollback invariants, role gating, follow-up rules, note-only event creation, and role-appropriate UI controls
+- runtime coverage in this pass includes migration bootstrap and round-trip smoke, placeholder-location cleanup, startup schema enforcement, browser login behavior, demo gating, org boundary checks, location validation, hierarchy-label rendering, historical location snapshot preservation, staff-created intake, lifecycle progression, direct contractor assignment, assignment rollback invariants, role gating, follow-up rules, note-only event creation, and role-appropriate UI controls
 
 ## Remaining Risks
 
@@ -84,8 +87,10 @@ Date: `2026-04-04 20:05:00 +11:00`
 
 ## Repository Honesty Correction
 
-- the current repo is credible as a student-living coordination pilot because it keeps a shared timeline, structured location context, and org-backed dispatch accountability
+- the current repo is credible as a residence-operations coordination pilot because it keeps a shared timeline, structured location context, and org-backed dispatch accountability
+- the intake record is now more credible for that pilot because the repo can represent resident self-service, staff-mediated intake, after-hours handoff, and inspection-origin entry without pretending every job started in the same portal flow
 - the current repo is not yet credible as a broader civil-works coordination platform because it still collapses intake, dispatch, attendance, and completion into one `Job`
+- resident access updates now land on the coordination owner instead of being mis-stamped as triage work, which better matches the booked-attendance workflow already implemented
 - dead compatibility surface that implied a separate legacy model layer has been removed instead of being kept as misleading future-facing noise
 
 ## Deferred For Phase 1

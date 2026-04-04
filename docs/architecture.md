@@ -1,16 +1,16 @@
 # Architecture
 
-Last updated: `2026-04-04 20:05:00 +11:00`
+Last updated: `2026-04-04 22:05:00 +11:00`
 
 ## Document Metadata
 
-- Owner: `student-living-platform`
+- Owner: `fixhub-pilot`
 - Reviewer: `schema-test-automation`
 - Status: `active`
 
 ## Overview
 
-The current implementation models one resident-facing job with shared timeline visibility across resident, operations, and contractor actors. Assignment is explicit and can target either a contractor organisation or a direct contractor user.
+The current implementation models one residence-operations job with shared timeline visibility across resident, operations, and contractor actors. Assignment is explicit and can target either a contractor organisation or a direct contractor user. It is a narrow pilot wedge toward broader civil-works coordination rather than a complete cross-network operating model.
 
 ## System Flow
 
@@ -63,7 +63,7 @@ flowchart TB
 | --- | --- | --- |
 | `reception` | resident or reception admin | report creation, intake notes |
 | `triage` | triage officer | mark triaged, assignment handoff |
-| `coordination` | triage officer or coordinator | schedule visits, on-hold routing, follow-up scheduling |
+| `coordination` | triage officer or coordinator | schedule visits, update access plans, on-hold routing, follow-up scheduling |
 | `execution` | contractor | start work, mark blocked, complete repair |
 
 ## Key Architectural Rules
@@ -72,4 +72,5 @@ flowchart TB
 - contractor read visibility follows recorded dispatch/participation history, while contractor write access still requires the current active dispatch target
 - contractor "assigned jobs" queues only show the current dispatch target; historical visibility stays on the job detail page instead of polluting the live work queue
 - accountability metadata, lifecycle targets, and assignment snapshots are stored on events instead of being reconstructed only from mutable job fields or free text
-- Student Living hierarchy is represented as `University of Newcastle -> Student Living`
+- scheduled and follow-up-scheduled states stay operations-owned coordination records until field attendance actually starts; contractor ownership begins at `in_progress`
+- the current seeded hierarchy is represented as `University of Newcastle -> Student Living`; that data is pilot context, not the product boundary

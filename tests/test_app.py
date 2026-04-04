@@ -9,6 +9,7 @@ from sqlalchemy import inspect, select
 
 from app.main import create_app
 from app.models import (
+    Asset,
     Base,
     ContractorMode,
     Event,
@@ -60,6 +61,8 @@ def lookup_ids(app) -> dict[str, uuid.UUID]:
         "student_living_org_id": orgs["Student Living"],
         "newcastle_plumbing_org_id": orgs["Newcastle Plumbing"],
         "campus_maintenance_org_id": orgs["Campus Maintenance"],
+        "resident_user_id": users["resident@fixhub.test"],
+        "resident_blockb_user_id": users["resident.blockb@fixhub.test"],
         "maintenance_contractor_user_id": users["maintenance.contractor@fixhub.test"],
         "org_contractor_user_id": users["contractor@fixhub.test"],
         "room_a14_location_id": locations["Block A Room 14"],
@@ -109,7 +112,10 @@ def move_to_in_progress(client: TestClient, job_id: str, *, assigned_org_id: uui
     switch_demo_user(client, "triage@fixhub.test")
     triage_response = client.patch(
         f"/api/jobs/{job_id}",
-        json={"status": "triaged"},
+        json={
+            "status": "triaged",
+            "event_message": "Reviewed the report details and confirmed the job is ready for booking",
+        },
     )
     assert triage_response.status_code == 200, triage_response.text
 
@@ -189,6 +195,101 @@ def test_job_events_are_sorted_by_timestamp_then_id_for_stable_timeline_reads(tm
 
     returned_ids = [event["id"] for event in events]
     assert returned_ids == sorted(returned_ids)
+
+
+def test_job_events_keep_historical_labels_after_live_records_are_renamed(tmp_path) -> None:
+    app, client = build_client(tmp_path)
+
+    with client:
+        ids = lookup_ids(app)
+        switch_demo_user(client, "resident@fixhub.test")
+        job = create_job(client, location_id=ids["room_a14_location_id"])
+
+        switch_demo_user(client, "coordinator@fixhub.test")
+        assign_response = client.patch(
+            f"/api/jobs/{job['id']}",
+            json={"assigned_org_id": str(ids["newcastle_plumbing_org_id"])},
+        )
+        assert assign_response.status_code == 200, assign_response.text
+
+        with app.state.SessionLocal() as session:
+            resident = session.scalar(select(User).where(User.email == "resident@fixhub.test").limit(1))
+            student_living = session.scalar(select(Organisation).where(Organisation.name == "Student Living").limit(1))
+            plumbing = session.scalar(select(Organisation).where(Organisation.name == "Newcastle Plumbing").limit(1))
+            room = session.scalar(select(Location).where(Location.id == ids["room_a14_location_id"]).limit(1))
+            sink = session.scalar(
+                select(Asset).where(Asset.location_id == ids["room_a14_location_id"], Asset.name == "Sink").limit(1)
+            )
+            assert resident is not None
+            assert student_living is not None
+            assert plumbing is not None
+            assert room is not None
+            assert sink is not None
+            resident.name = "Renamed Resident"
+            student_living.name = "Renamed Student Living"
+            plumbing.name = "Renamed Plumbing"
+            room.name = "Renamed Room 14"
+            sink.name = "Renamed Sink"
+            session.commit()
+
+        events = job_events(client, job["id"])
+
+    report_event = next(event for event in events if event["event_type"] == "report_created")
+    assignment_event = next(event for event in events if event["event_type"] == "assignment")
+
+    assert report_event["actor_name"] == "Riley Resident"
+    assert report_event["organisation_name"] == "Student Living"
+    assert report_event["actor_label"] == "Riley Resident (Resident, Student Living)"
+    assert report_event["location"] == "Callaghan Campus > Block A > Block A Room 14"
+    assert report_event["asset_name"] == "Sink"
+    assert assignment_event["assigned_org_name"] == "Newcastle Plumbing"
+
+
+def test_job_reads_keep_assignment_snapshot_labels_after_live_records_are_renamed(tmp_path) -> None:
+    app, client = build_client(tmp_path)
+
+    with client:
+        ids = lookup_ids(app)
+        switch_demo_user(client, "resident@fixhub.test")
+        job = create_job(client, location_id=ids["room_a14_location_id"])
+
+        switch_demo_user(client, "coordinator@fixhub.test")
+        assign_response = client.patch(
+            f"/api/jobs/{job['id']}",
+            json={
+                "assigned_org_id": str(ids["campus_maintenance_org_id"]),
+                "assigned_contractor_user_id": str(ids["maintenance_contractor_user_id"]),
+            },
+        )
+        assert assign_response.status_code == 200, assign_response.text
+
+        with app.state.SessionLocal() as session:
+            maintenance = session.scalar(
+                select(Organisation).where(Organisation.id == ids["campus_maintenance_org_id"]).limit(1)
+            )
+            maintenance_user = session.scalar(
+                select(User).where(User.id == ids["maintenance_contractor_user_id"]).limit(1)
+            )
+            assert maintenance is not None
+            assert maintenance_user is not None
+            maintenance.name = "Renamed Campus Maintenance"
+            maintenance_user.name = "Renamed Maintenance Tech"
+            session.commit()
+
+        switch_demo_user(client, "resident@fixhub.test")
+        resident_read = client.get(f"/api/jobs/{job['id']}")
+
+        switch_demo_user(client, "triage@fixhub.test")
+        operations_read = client.get(f"/api/jobs/{job['id']}")
+
+    assert resident_read.status_code == 200
+    assert resident_read.json()["assigned_org_name"] == "Campus Maintenance"
+    assert resident_read.json()["assigned_contractor_name"] == "Maddie Maintenance Technician"
+    assert resident_read.json()["assignee_label"] == "Maddie Maintenance Technician"
+
+    assert operations_read.status_code == 200
+    assert operations_read.json()["assigned_org_name"] == "Campus Maintenance"
+    assert operations_read.json()["assigned_contractor_name"] == "Maddie Maintenance Technician"
 
 
 def test_demo_auth_is_disabled_by_default(tmp_path) -> None:
@@ -436,6 +537,99 @@ def test_resident_report_page_lists_reportable_locations_only(tmp_path) -> None:
     assert "Leave asset blank if you only know the location." in report_page.text
 
 
+def test_operations_can_log_staff_created_job_for_resident_and_resident_can_see_it(tmp_path) -> None:
+    app, client = build_client(tmp_path)
+
+    with client:
+        ids = lookup_ids(app)
+        switch_demo_user(client, "reception@fixhub.test")
+        response = client.post(
+            "/api/jobs",
+            json={
+                "reported_for_user_id": str(ids["resident_user_id"]),
+                "intake_channel": "staff_created",
+                "title": "Staff logged blocked shower drain",
+                "description": "Resident reported the blocked drain at the desk because the portal was unavailable.",
+                "location_id": str(ids["room_a14_location_id"]),
+                "asset_name": "Sink",
+                "location_detail_text": "Ensuite floor waste beside the vanity",
+            },
+        )
+        admin_page = client.get("/admin/jobs")
+
+        switch_demo_user(client, "resident@fixhub.test")
+        resident_read = client.get(f"/api/jobs/{response.json()['id']}")
+        resident_page = client.get(f"/resident/jobs/{response.json()['id']}")
+
+    assert response.status_code == 201, response.text
+    payload = response.json()
+    assert payload["created_by_name"] == "Riley Resident"
+    assert payload["intake_channel"] == "staff_created"
+    assert payload["intake_channel_label"] == "Staff-created"
+    assert payload["reported_by_actor_label"] == "Fran Front Desk (Front Desk, Student Living)"
+    assert payload["intake_summary"] == "Fran Front Desk (Front Desk, Student Living) logged this issue on behalf of Riley Resident."
+
+    assert admin_page.status_code == 200
+    assert "Intake: Staff-created by Fran Front Desk (Front Desk, Student Living)" in admin_page.text
+
+    assert resident_read.status_code == 200
+    resident_payload = resident_read.json()
+    assert resident_payload["created_by_name"] == "Riley Resident"
+    assert resident_payload["reported_by_actor_label"] == "Fran Front Desk (Front Desk, Student Living)"
+
+    assert resident_page.status_code == 200
+    assert "How this was logged" in resident_page.text
+    assert "Staff-created" in resident_page.text
+    assert "logged this issue on behalf of Riley Resident" in resident_page.text
+
+
+def test_admin_report_page_exposes_structured_on_behalf_intake_form(tmp_path) -> None:
+    _, client = build_client(tmp_path)
+
+    with client:
+        switch_demo_user(client, "coordinator@fixhub.test", next_path="/admin/report")
+        response = client.get("/admin/report")
+
+    assert response.status_code == 200
+    assert "Log intake on behalf of a resident" in response.text
+    assert 'name="reported_for_user_id"' in response.text
+    assert 'name="intake_channel"' in response.text
+    assert "After-hours support" in response.text
+    assert "Inspection or housekeeping" in response.text
+
+
+def test_operations_created_jobs_require_resident_target_and_structured_intake_channel(tmp_path) -> None:
+    app, client = build_client(tmp_path)
+
+    with client:
+        ids = lookup_ids(app)
+        switch_demo_user(client, "triage@fixhub.test")
+        missing_resident = client.post(
+            "/api/jobs",
+            json={
+                "intake_channel": "staff_created",
+                "title": "Missing resident",
+                "description": "Should fail.",
+                "location_id": str(ids["room_a14_location_id"]),
+            },
+        )
+        wrong_channel = client.post(
+            "/api/jobs",
+            json={
+                "reported_for_user_id": str(ids["resident_user_id"]),
+                "intake_channel": "resident_portal",
+                "title": "Wrong intake",
+                "description": "Should fail.",
+                "location_id": str(ids["room_a14_location_id"]),
+            },
+        )
+
+    assert missing_resident.status_code == 422
+    assert missing_resident.json() == {"detail": "Operations-created jobs require reported_for_user_id"}
+    assert wrong_channel.status_code == 422
+    assert "Operations intake_channel must be one of" in wrong_channel.json()["detail"]
+
+
 def test_legacy_placeholder_locations_are_hidden_from_catalog_and_rejected(tmp_path) -> None:
     app, client = build_client(tmp_path)
 
@@ -608,7 +802,10 @@ def test_resident_triage_schedule_execute_flow_records_structured_metadata(tmp_p
         switch_demo_user(client, "triage@fixhub.test")
         triage_response = client.patch(
             f"/api/jobs/{job['id']}",
-            json={"status": "triaged"},
+            json={
+                "status": "triaged",
+                "event_message": "Reviewed the report details and confirmed the job is ready for booking",
+            },
         )
         assert triage_response.status_code == 200, triage_response.text
 
@@ -698,7 +895,10 @@ def test_direct_contractor_assignment_supports_named_technician_dispatch_and_vis
         switch_demo_user(client, "triage@fixhub.test")
         triage_response = client.patch(
             f"/api/jobs/{job['id']}",
-            json={"status": "triaged"},
+            json={
+                "status": "triaged",
+                "event_message": "Reviewed the report details and confirmed the job is ready for booking",
+            },
         )
         assert triage_response.status_code == 200, triage_response.text
 
@@ -1021,7 +1221,10 @@ def test_triage_and_schedule_are_role_gated(tmp_path) -> None:
         switch_demo_user(client, "reception@fixhub.test")
         reception_triage = client.patch(
             f"/api/jobs/{job['id']}",
-            json={"status": "triaged"},
+            json={
+                "status": "triaged",
+                "event_message": "Reviewed the report details and confirmed the job is ready for booking",
+            },
         )
 
         switch_demo_user(client, "coordinator@fixhub.test")
@@ -1033,7 +1236,10 @@ def test_triage_and_schedule_are_role_gated(tmp_path) -> None:
         switch_demo_user(client, "triage@fixhub.test")
         triage_response = client.patch(
             f"/api/jobs/{job['id']}",
-            json={"status": "triaged"},
+            json={
+                "status": "triaged",
+                "event_message": "Reviewed the report details and confirmed the job is ready for booking",
+            },
         )
         schedule_response = client.patch(
             f"/api/jobs/{job['id']}",
@@ -1044,6 +1250,36 @@ def test_triage_and_schedule_are_role_gated(tmp_path) -> None:
     assert coordinator_schedule.status_code == 403
     assert triage_response.status_code == 200
     assert schedule_response.status_code == 200
+
+
+def test_triage_requires_an_explicit_operational_note(tmp_path) -> None:
+    app, client = build_client(tmp_path)
+
+    with client:
+        ids = lookup_ids(app)
+        switch_demo_user(client, "resident@fixhub.test")
+        job = create_job(client, location_id=ids["room_a14_location_id"], title="Wardrobe door loose")
+
+        switch_demo_user(client, "triage@fixhub.test")
+        invalid_triage = client.patch(
+            f"/api/jobs/{job['id']}",
+            json={"status": "triaged"},
+        )
+        valid_triage = client.patch(
+            f"/api/jobs/{job['id']}",
+            json={
+                "status": "triaged",
+                "event_message": "Reviewed the resident report and confirmed the job is ready for booking",
+            },
+        )
+
+    assert invalid_triage.status_code == 422
+    assert invalid_triage.json() == {"detail": "event_message is required when moving a job to triaged"}
+    assert valid_triage.status_code == 200
+    assert valid_triage.json()["status"] == "triaged"
+    assert valid_triage.json()["coordination_detail"] == (
+        "Reviewed the resident report and confirmed the job is ready for booking"
+    )
 
 
 def test_follow_up_requires_reason_and_cannot_complete_without_returning_to_in_progress(tmp_path) -> None:
@@ -1143,7 +1379,13 @@ def test_structured_note_updates_coordination_signal_without_fake_status_change(
         assert assign_response.status_code == 200, assign_response.text
 
         switch_demo_user(client, "triage@fixhub.test")
-        triage_response = client.patch(f"/api/jobs/{job['id']}", json={"status": "triaged"})
+        triage_response = client.patch(
+            f"/api/jobs/{job['id']}",
+            json={
+                "status": "triaged",
+                "event_message": "Reviewed the report details and confirmed the job is ready for booking",
+            },
+        )
         assert triage_response.status_code == 200, triage_response.text
         schedule_response = client.patch(
             f"/api/jobs/{job['id']}",
@@ -1173,6 +1415,8 @@ def test_structured_note_updates_coordination_signal_without_fake_status_change(
     assert resident_view.json()["coordination_detail"] == (
         "Resident asked to move the access window after the original booking"
     )
+    assert resident_view.json()["latest_event_type"] == "note"
+    assert resident_view.json()["latest_lifecycle_event_type"] == "schedule"
     assert events[-1]["target_status"] is None
     assert events[-1]["reason_code"] == "resident_access_issue"
 
@@ -1193,7 +1437,13 @@ def test_assignment_only_change_surfaces_as_dispatch_update_without_fake_progres
         assert first_assign.status_code == 200, first_assign.text
 
         switch_demo_user(client, "triage@fixhub.test")
-        triage_response = client.patch(f"/api/jobs/{job['id']}", json={"status": "triaged"})
+        triage_response = client.patch(
+            f"/api/jobs/{job['id']}",
+            json={
+                "status": "triaged",
+                "event_message": "Reviewed the report details and confirmed the job is ready for booking",
+            },
+        )
         assert triage_response.status_code == 200, triage_response.text
 
         switch_demo_user(client, "coordinator@fixhub.test")
@@ -1232,6 +1482,13 @@ def test_note_events_snapshot_current_assignment_context(tmp_path) -> None:
         )
         assert assign_response.status_code == 200, assign_response.text
 
+        with app.state.SessionLocal() as session:
+            drifted_job = session.get(Job, uuid.UUID(job["id"]))
+            assert drifted_job is not None
+            drifted_job.assigned_org_id = ids["campus_maintenance_org_id"]
+            drifted_job.assigned_org = session.get(Organisation, ids["campus_maintenance_org_id"])
+            session.commit()
+
         note_response = client.post(
             f"/api/jobs/{job['id']}/events",
             json={"message": "Contractor attendance window requested"},
@@ -1241,6 +1498,43 @@ def test_note_events_snapshot_current_assignment_context(tmp_path) -> None:
     assert note_response.json()["assigned_org_id"] == str(ids["newcastle_plumbing_org_id"])
     assert note_response.json()["assigned_org_name"] == "Newcastle Plumbing"
     assert note_response.json()["assigned_contractor_user_id"] is None
+
+
+def test_resident_updates_snapshot_event_backed_assignment_context_when_job_row_drifts(tmp_path) -> None:
+    app, client = build_client(tmp_path)
+
+    with client:
+        ids = lookup_ids(app)
+        switch_demo_user(client, "resident@fixhub.test")
+        job = create_job(client, location_id=ids["room_a14_location_id"])
+
+        switch_demo_user(client, "coordinator@fixhub.test")
+        assign_response = client.patch(
+            f"/api/jobs/{job['id']}",
+            json={"assigned_org_id": str(ids["newcastle_plumbing_org_id"])},
+        )
+        assert assign_response.status_code == 200, assign_response.text
+
+        with app.state.SessionLocal() as session:
+            drifted_job = session.get(Job, uuid.UUID(job["id"]))
+            assert drifted_job is not None
+            drifted_job.assigned_org_id = ids["campus_maintenance_org_id"]
+            drifted_job.assigned_org = session.get(Organisation, ids["campus_maintenance_org_id"])
+            session.commit()
+
+        switch_demo_user(client, "resident@fixhub.test")
+        resident_update = client.post(
+            f"/api/jobs/{job['id']}/resident-update",
+            json={
+                "message": "I can give access after 4pm once classes finish.",
+                "reason_code": "resident_access_update",
+            },
+        )
+
+    assert resident_update.status_code == 201, resident_update.text
+    assert resident_update.json()["assigned_org_id"] == str(ids["newcastle_plumbing_org_id"])
+    assert resident_update.json()["assigned_org_name"] == "Newcastle Plumbing"
+    assert resident_update.json()["assigned_contractor_user_id"] is None
 
 
 def test_contractor_visibility_uses_event_backed_assignment_when_job_row_drifts(tmp_path) -> None:
@@ -1293,7 +1587,13 @@ def test_reassigned_contractor_keeps_read_access_but_loses_write_access(tmp_path
         assert first_assign.status_code == 200, first_assign.text
 
         switch_demo_user(client, "triage@fixhub.test")
-        triage_response = client.patch(f"/api/jobs/{job['id']}", json={"status": "triaged"})
+        triage_response = client.patch(
+            f"/api/jobs/{job['id']}",
+            json={
+                "status": "triaged",
+                "event_message": "Reviewed the report details and confirmed the job is ready for booking",
+            },
+        )
         assert triage_response.status_code == 200, triage_response.text
 
         switch_demo_user(client, "coordinator@fixhub.test")
@@ -1376,6 +1676,30 @@ def test_job_and_event_reads_keep_original_location_snapshot_after_location_rena
     assert events[0]["location"] == "Callaghan Campus > Block A > Block A Room 14"
 
 
+def test_job_and_event_reads_keep_original_asset_snapshot_after_asset_rename(tmp_path) -> None:
+    app, client = build_client(tmp_path)
+
+    with client:
+        ids = lookup_ids(app)
+        switch_demo_user(client, "resident@fixhub.test")
+        job = create_job(client, location_id=ids["room_a14_location_id"], asset_name="Sink")
+
+        with app.state.SessionLocal() as session:
+            created_job = session.get(Job, uuid.UUID(job["id"]))
+            assert created_job is not None
+            asset = session.get(Asset, created_job.asset_id)
+            assert asset is not None
+            asset.name = "Sink Renamed"
+            session.commit()
+
+        fetched_job = client.get(f"/api/jobs/{job['id']}")
+        events = job_events(client, job["id"])
+
+    assert fetched_job.status_code == 200
+    assert fetched_job.json()["asset_name"] == "Sink"
+    assert events[0]["asset_name"] == "Sink"
+
+
 def test_assignment_from_new_emits_dispatch_audit_without_silent_lifecycle_change(tmp_path) -> None:
     app, client = build_client(tmp_path)
 
@@ -1399,6 +1723,7 @@ def test_assignment_from_new_emits_dispatch_audit_without_silent_lifecycle_chang
         "Assigned Newcastle Plumbing",
     ]
     assert [event["target_status"] for event in events] == ["new", None]
+    assert events[-1]["responsibility_stage"] == "coordination"
     assert assign_response.json()["status"] == "new"
 
 
@@ -1446,6 +1771,7 @@ def test_resident_job_page_shows_projected_coordination_summary(tmp_path) -> Non
     assert "Current coordination" in page.text
     assert "Dispatch target updated without changing lifecycle state" in page.text
     assert "Dispatch coordinator" in page.text
+    assert "Dispatch at this update: Newcastle Plumbing" in page.text
 
 
 def test_resident_page_prefers_assignment_handoff_over_generic_triage_echo(tmp_path) -> None:
@@ -1464,7 +1790,13 @@ def test_resident_page_prefers_assignment_handoff_over_generic_triage_echo(tmp_p
         assert assign_response.status_code == 200, assign_response.text
 
         switch_demo_user(client, "triage@fixhub.test")
-        triage_response = client.patch(f"/api/jobs/{job['id']}", json={"status": "triaged"})
+        triage_response = client.patch(
+            f"/api/jobs/{job['id']}",
+            json={
+                "status": "triaged",
+                "event_message": "Reviewed the report details and confirmed the job is ready for booking",
+            },
+        )
         assert triage_response.status_code == 200, triage_response.text
 
         job_read = client.get(f"/api/jobs/{job['id']}")
@@ -1506,10 +1838,10 @@ def test_resident_can_add_access_update_that_staff_can_see_on_job_page(tmp_path)
     assert operations_page.status_code == 200
     assert "Resident sent an access update that operations need to apply" in operations_page.text
     assert "I can give access after 3pm Tuesday" in operations_page.text
-    assert "Owner: Triage Officer" in operations_page.text
+    assert "Owner: Dispatch Coordinator" in operations_page.text
     assert events[-1]["actor_role"] == "resident"
     assert events[-1]["reason_code"] == "resident_access_update"
-    assert events[-1]["responsibility_owner"] == "triage_officer"
+    assert events[-1]["responsibility_owner"] == "coordinator"
 
 
 def test_job_read_includes_operational_history_summary_for_repeat_asset(tmp_path) -> None:
@@ -1535,10 +1867,10 @@ def test_job_read_includes_operational_history_summary_for_repeat_asset(tmp_path
 
     assert job_read.status_code == 200
     payload = job_read.json()
-    assert payload["operational_history_headline"] == "Earlier work exists on this asset"
+    assert payload["operational_history_headline"] == "Repeat issue risk on this asset"
     assert payload["operational_history_summary"] == (
-        "1 earlier visible job(s) here, including 1 on this asset. "
-        "0 related job(s) are still open. Latest earlier record: Leaking bathroom tap (Completed)."
+        "1 other visible job(s) here, including 1 on this asset. 0 related asset job(s) are still open. "
+        "0 related job(s) are still open. Latest related record: Leaking bathroom tap (Completed)."
     )
     assert payload["operational_history_location_job_count"] == 1
     assert payload["operational_history_asset_job_count"] == 1
@@ -1559,8 +1891,49 @@ def test_operations_job_page_surfaces_operational_history_signal(tmp_path) -> No
 
     assert page.status_code == 200
     assert "Operational history signal" in page.text
-    assert "Earlier work exists on this asset" in page.text
-    assert "1 earlier visible job(s) here, including 1 on this asset." in page.text
+    assert "Repeat issue risk on this asset" in page.text
+    assert "1 other visible job(s) here, including 1 on this asset. 1 related asset job(s) are still open." in page.text
+
+
+def test_job_list_returns_truthful_operational_history_instead_of_placeholder_defaults(tmp_path) -> None:
+    app, client = build_client(tmp_path)
+
+    with client:
+        ids = lookup_ids(app)
+        switch_demo_user(client, "resident@fixhub.test")
+        earlier_job = create_job(client, location_id=ids["room_a14_location_id"], title="Earlier sink leak")
+        complete_org_assigned_job(
+            client,
+            earlier_job["id"],
+            assigned_org_id=ids["newcastle_plumbing_org_id"],
+        )
+        repeat_job = create_job(client, location_id=ids["room_a14_location_id"], title="Current sink leak")
+
+        jobs_response = client.get("/api/jobs?mine=true")
+
+    assert jobs_response.status_code == 200
+    repeat_payload = next(job for job in jobs_response.json() if job["id"] == repeat_job["id"])
+    assert repeat_payload["operational_history_headline"] == "Repeat issue risk on this asset"
+    assert repeat_payload["operational_history_location_job_count"] == 1
+    assert repeat_payload["operational_history_asset_job_count"] == 1
+    assert repeat_payload["operational_history_open_job_count"] == 0
+
+
+def test_operations_queue_surfaces_operational_history_signal_on_job_cards(tmp_path) -> None:
+    app, client = build_client(tmp_path)
+
+    with client:
+        ids = lookup_ids(app)
+        switch_demo_user(client, "resident@fixhub.test")
+        create_job(client, location_id=ids["room_a14_location_id"], title="Earlier sink leak")
+        repeat_job = create_job(client, location_id=ids["room_a14_location_id"], title="Current sink leak")
+
+        switch_demo_user(client, "triage@fixhub.test", next_path=f"/admin/jobs/{repeat_job['id']}")
+        queue_page = client.get("/admin/jobs")
+
+    assert queue_page.status_code == 200
+    assert "Repeat history: Repeat issue risk on this asset" in queue_page.text
+    assert "1 other visible job(s) here, including 1 on this asset. 1 related asset job(s) are still open." in queue_page.text
 
 
 def test_job_read_includes_latest_cross_role_updates(tmp_path) -> None:
@@ -1589,7 +1962,10 @@ def test_job_read_includes_latest_cross_role_updates(tmp_path) -> None:
         switch_demo_user(client, "triage@fixhub.test")
         triage_response = client.patch(
             f"/api/jobs/{job['id']}",
-            json={"status": "triaged"},
+            json={
+                "status": "triaged",
+                "event_message": "Reviewed the report details and confirmed the job is ready for booking",
+            },
         )
         assert triage_response.status_code == 200, triage_response.text
 
@@ -1636,7 +2012,10 @@ def test_job_read_includes_action_required_projection(tmp_path) -> None:
         switch_demo_user(client, "triage@fixhub.test")
         triage_response = client.patch(
             f"/api/jobs/{job['id']}",
-            json={"status": "triaged"},
+            json={
+                "status": "triaged",
+                "event_message": "Reviewed the report details and confirmed the job is ready for booking",
+            },
         )
         assert triage_response.status_code == 200, triage_response.text
 
@@ -1686,6 +2065,7 @@ def test_demo_seed_data_includes_live_pilot_backlog(tmp_path) -> None:
     assert admin_page.status_code == 200
     assert "Action needed now" in admin_page.text
     assert "Laundry pump failing again" in admin_page.text
+    assert "Repeat history: Repeat issue risk on this asset" in admin_page.text
 
 
 def test_cross_role_update_panels_surface_latest_handoffs_on_job_pages(tmp_path) -> None:
@@ -1714,7 +2094,10 @@ def test_cross_role_update_panels_surface_latest_handoffs_on_job_pages(tmp_path)
         switch_demo_user(client, "triage@fixhub.test")
         triage_response = client.patch(
             f"/api/jobs/{job['id']}",
-            json={"status": "triaged"},
+            json={
+                "status": "triaged",
+                "event_message": "Reviewed the report details and confirmed the job is ready for booking",
+            },
         )
         assert triage_response.status_code == 200, triage_response.text
 
@@ -1739,19 +2122,39 @@ def test_cross_role_update_panels_surface_latest_handoffs_on_job_pages(tmp_path)
         resident_page = client.get(f"/resident/jobs/{job['id']}")
 
     assert resident_page.status_code == 200
-    assert "Latest team updates" in resident_page.text
+    assert "Shared progress updates" in resident_page.text
     assert "Booked campus maintenance for the afternoon attendance window" in resident_page.text
     assert "On site now, checking the fitting and confirming the replacement lamp stock" in resident_page.text
+    assert "Resident confirmed the desk area is free after lunch for access." in resident_page.text
 
     assert operations_page.status_code == 200
-    assert "Cross-role updates" in operations_page.text
+    assert "Shared progress updates" in operations_page.text
     assert "Please avoid 9-11am because the room is occupied for an exam support session." in operations_page.text
     assert "On site now, checking the fitting and confirming the replacement lamp stock" in operations_page.text
+    assert "Booked campus maintenance for the afternoon attendance window" in operations_page.text
 
     assert contractor_page.status_code == 200
-    assert "Latest handoff context" in contractor_page.text
+    assert "Shared progress updates" in contractor_page.text
     assert "Booked campus maintenance for the afternoon attendance window" in contractor_page.text
     assert "Please avoid 9-11am because the room is occupied for an exam support session." in contractor_page.text
+    assert "On site now, checking the fitting and confirming the replacement lamp stock" in contractor_page.text
+
+
+def test_resident_job_page_exposes_explicit_recurrence_update_after_completion(tmp_path) -> None:
+    app, client = build_client(tmp_path)
+
+    with client:
+        ids = lookup_ids(app)
+        switch_demo_user(client, "resident@fixhub.test")
+        job = create_job(client, location_id=ids["room_a14_location_id"], title="Mixer leak after prior repair")
+        complete_org_assigned_job(client, job["id"], assigned_org_id=ids["newcastle_plumbing_org_id"])
+
+        switch_demo_user(client, "resident@fixhub.test", next_path=f"/resident/jobs/{job['id']}")
+        page = client.get(f"/resident/jobs/{job['id']}")
+
+    assert page.status_code == 200
+    assert "Issue returned after completion" in page.text
+    assert "resident_reported_recurrence" in page.text
 
 
 def test_job_pages_surface_repeat_history_for_same_location(tmp_path) -> None:
@@ -1773,7 +2176,13 @@ def test_job_pages_surface_repeat_history_for_same_location(tmp_path) -> None:
         assert assign_response.status_code == 200, assign_response.text
 
         switch_demo_user(client, "triage@fixhub.test")
-        triage_response = client.patch(f"/api/jobs/{current_job['id']}", json={"status": "triaged"})
+        triage_response = client.patch(
+            f"/api/jobs/{current_job['id']}",
+            json={
+                "status": "triaged",
+                "event_message": "Reviewed the report details and confirmed the job is ready for booking",
+            },
+        )
         assert triage_response.status_code == 200, triage_response.text
 
         schedule_response = client.patch(
@@ -1823,7 +2232,13 @@ def test_response_needed_signal_tracks_newer_cross_role_updates(tmp_path) -> Non
         assert assign_response.status_code == 200, assign_response.text
 
         switch_demo_user(client, "triage@fixhub.test")
-        triage_response = client.patch(f"/api/jobs/{resident_job['id']}", json={"status": "triaged"})
+        triage_response = client.patch(
+            f"/api/jobs/{resident_job['id']}",
+            json={
+                "status": "triaged",
+                "event_message": "Reviewed the report details and confirmed the job is ready for booking",
+            },
+        )
         assert triage_response.status_code == 200, triage_response.text
         schedule_response = client.patch(
             f"/api/jobs/{resident_job['id']}",
@@ -1893,6 +2308,103 @@ def test_response_needed_signal_tracks_newer_cross_role_updates(tmp_path) -> Non
     assert "Response-needed signal: Field blocker needs coordination" in blocked_queue.text
 
 
+def test_visit_plan_snapshot_surfaces_booking_access_and_blockers_across_role_views(tmp_path) -> None:
+    app, client = build_client(tmp_path)
+
+    with client:
+        ids = lookup_ids(app)
+        switch_demo_user(client, "resident@fixhub.test")
+        job = create_job(client, location_id=ids["room_a14_location_id"], title="Bathroom visit plan check")
+
+        switch_demo_user(client, "coordinator@fixhub.test")
+        assign_response = client.patch(
+            f"/api/jobs/{job['id']}",
+            json={"assigned_org_id": str(ids["newcastle_plumbing_org_id"])},
+        )
+        assert assign_response.status_code == 200, assign_response.text
+
+        switch_demo_user(client, "triage@fixhub.test")
+        triage_response = client.patch(
+            f"/api/jobs/{job['id']}",
+            json={
+                "status": "triaged",
+                "event_message": "Reviewed the report details and confirmed the job is ready for booking",
+            },
+        )
+        assert triage_response.status_code == 200, triage_response.text
+        schedule_response = client.patch(
+            f"/api/jobs/{job['id']}",
+            json={"status": "scheduled", "event_message": "Booked plumber for Friday 14:00-16:00 after resident access confirmation"},
+        )
+        assert schedule_response.status_code == 200, schedule_response.text
+
+        switch_demo_user(client, "resident@fixhub.test")
+        access_response = client.post(
+            f"/api/jobs/{job['id']}/resident-update",
+            json={
+                "message": "Please avoid 3pm because the room is locked for a welfare check.",
+                "reason_code": "resident_access_update",
+            },
+        )
+        assert access_response.status_code == 201, access_response.text
+
+        resident_read = client.get(f"/api/jobs/{job['id']}")
+        resident_page = client.get(f"/resident/jobs/{job['id']}")
+
+        switch_demo_user(client, "contractor@fixhub.test")
+        contractor_page = client.get(f"/contractor/jobs/{job['id']}")
+        blocked_response = client.patch(
+            f"/api/jobs/{job['id']}",
+            json={
+                "status": "blocked",
+                "reason_code": "no_access",
+                "event_message": "Arrived on site but front desk had no master key available for the room.",
+            },
+        )
+        assert blocked_response.status_code == 200, blocked_response.text
+        contractor_queue = client.get("/contractor/jobs")
+
+        switch_demo_user(client, "triage@fixhub.test")
+        operations_read = client.get(f"/api/jobs/{job['id']}")
+        operations_page = client.get(f"/admin/jobs/{job['id']}")
+        operations_queue = client.get("/admin/jobs")
+
+    assert resident_read.status_code == 200
+    resident_payload = resident_read.json()
+    assert resident_payload["visit_plan_headline"] == "Resident access note is newer than the booked visit"
+    assert resident_payload["visit_booking_message"] == (
+        "Booked plumber for Friday 14:00-16:00 after resident access confirmation"
+    )
+    assert resident_payload["visit_access_message"] == "Please avoid 3pm because the room is locked for a welfare check."
+
+    assert resident_page.status_code == 200
+    assert "Current visit plan" in resident_page.text
+    assert "Resident access note is newer than the booked visit" in resident_page.text
+
+    assert contractor_queue.status_code == 200
+    assert "Visit plan: Access arrangement is not ready for the next visit" in contractor_queue.text
+    assert "Access blocker: Arrived on site but front desk had no master key available for the room." in contractor_queue.text
+
+    assert operations_read.status_code == 200
+    operations_payload = operations_read.json()
+    assert operations_payload["visit_plan_headline"] == "Access arrangement is not ready for the next visit"
+    assert operations_payload["visit_blocker_message"] == (
+        "Arrived on site but front desk had no master key available for the room."
+    )
+
+    assert operations_page.status_code == 200
+    assert "Current visit plan" in operations_page.text
+    assert "Access arrangement is not ready for the next visit" in operations_page.text
+    assert "Arrived on site but front desk had no master key available for the room." in operations_page.text
+
+    assert contractor_page.status_code == 200
+    assert "Current visit plan" in contractor_page.text
+    assert "Resident access note is newer than the booked visit" in contractor_page.text
+
+    assert operations_queue.status_code == 200
+    assert "Visit plan: Access arrangement is not ready for the next visit" in operations_queue.text
+
+
 def test_completed_job_surfaces_resident_recurrence_without_fake_status_change(tmp_path) -> None:
     app, client = build_client(tmp_path)
 
@@ -1923,12 +2435,117 @@ def test_completed_job_surfaces_resident_recurrence_without_fake_status_change(t
     assert resident_job.json()["coordination_headline"] == "Resident says the issue is still active after completion"
     assert resident_job.json()["coordination_owner_label"] == "Property manager"
     assert resident_job.json()["latest_event_actor_label"].startswith("Riley Resident")
+    assert resident_job.json()["latest_event_type"] == "note"
+    assert resident_job.json()["latest_lifecycle_event_type"] == "completion"
     assert resident_page.status_code == 200
     assert "Resident says the issue is still active after completion" in resident_page.text
     assert operations_page.status_code == 200
-    assert "Updated " in operations_page.text
+    assert "Latest timeline event" in operations_page.text
+    assert "Lifecycle last changed" in operations_page.text
     assert events[-1]["target_status"] is None
     assert events[-1]["reason_code"] == "issue_still_present"
+
+
+def test_completed_job_can_record_resident_resolution_confirmation_without_creating_response_needed_signal(tmp_path) -> None:
+    app, client = build_client(tmp_path)
+
+    with client:
+        ids = lookup_ids(app)
+        switch_demo_user(client, "resident@fixhub.test")
+        job = create_job(client, location_id=ids["room_a14_location_id"], title="Tap repaired and resident confirmed")
+        complete_org_assigned_job(client, job["id"], assigned_org_id=ids["newcastle_plumbing_org_id"])
+
+        resolution_response = client.post(
+            f"/api/jobs/{job['id']}/resident-update",
+            json={
+                "message": "The tap has stayed dry since the plumber attended yesterday.",
+                "reason_code": "resident_confirmed_resolved",
+            },
+        )
+        resident_job = client.get(f"/api/jobs/{job['id']}")
+        resident_page = client.get(f"/resident/jobs/{job['id']}")
+
+        switch_demo_user(client, "triage@fixhub.test", next_path=f"/admin/jobs/{job['id']}")
+        operations_page = client.get(f"/admin/jobs/{job['id']}")
+        operations_queue = client.get("/admin/jobs")
+        events = job_events(client, job["id"])
+
+    assert resolution_response.status_code == 201, resolution_response.text
+    assert resolution_response.json()["reason_code"] == "resident_confirmed_resolved"
+    assert resolution_response.json()["responsibility_stage"] == "execution"
+    assert resolution_response.json()["responsibility_owner"] == "resident"
+
+    assert resident_job.status_code == 200
+    resident_payload = resident_job.json()
+    assert resident_payload["status"] == "completed"
+    assert resident_payload["coordination_headline"] == "Resident confirmed the issue is resolved after the visit"
+    assert resident_payload["coordination_detail"] == "The tap has stayed dry since the plumber attended yesterday."
+    assert resident_payload["pending_signal_headline"] is None
+
+    assert resident_page.status_code == 200
+    assert "Issue resolved after visit" in resident_page.text
+    assert "Resident confirmed the issue is resolved after the visit" in resident_page.text
+
+    assert operations_page.status_code == 200
+    assert "Resident confirmed the issue is resolved after the visit" in operations_page.text
+
+    assert operations_queue.status_code == 200
+    assert "Tap repaired and resident confirmed" in operations_queue.text
+    assert "The tap has stayed dry since the plumber attended yesterday." in operations_queue.text
+
+    assert events[-1]["target_status"] is None
+    assert events[-1]["reason_code"] == "resident_confirmed_resolved"
+
+
+def test_completed_job_clears_current_assignment_before_recording_completion(tmp_path) -> None:
+    app, client = build_client(tmp_path)
+
+    with client:
+        ids = lookup_ids(app)
+        switch_demo_user(client, "resident@fixhub.test")
+        job = create_job(client, location_id=ids["room_a14_location_id"], title="Completion clears assignment")
+        move_to_in_progress(client, job["id"], assigned_org_id=ids["newcastle_plumbing_org_id"])
+
+        switch_demo_user(client, "contractor@fixhub.test")
+        before_completion = client.get("/api/jobs?assigned=true")
+        complete_response = client.patch(
+            f"/api/jobs/{job['id']}",
+            json={
+                "status": "completed",
+                "event_message": "Replaced the failed washer and confirmed the tap is no longer leaking",
+                "responsibility_stage": "execution",
+            },
+        )
+        after_completion = client.get("/api/jobs?assigned=true")
+        job_detail = client.get(f"/api/jobs/{job['id']}")
+
+        switch_demo_user(client, "triage@fixhub.test")
+        events = job_events(client, job["id"])
+
+    assert before_completion.status_code == 200
+    assert [item["id"] for item in before_completion.json()] == [job["id"]]
+
+    assert complete_response.status_code == 200, complete_response.text
+    completed_payload = complete_response.json()
+    assert completed_payload["status"] == "completed"
+    assert completed_payload["assigned_org_id"] is None
+    assert completed_payload["assignee_label"] is None
+    assert completed_payload["latest_event_type"] == "completion"
+    assert completed_payload["latest_lifecycle_event_type"] == "completion"
+
+    assert after_completion.status_code == 200
+    assert after_completion.json() == []
+
+    assert job_detail.status_code == 200
+    assert job_detail.json()["status"] == "completed"
+    assert job_detail.json()["assigned_org_id"] is None
+    assert job_detail.json()["coordination_headline"] == "Work marked complete"
+
+    assignment_cleared_index = next(i for i, event in enumerate(events) if event["message"] == "Assignment cleared")
+    completion_index = next(i for i, event in enumerate(events) if event["target_status"] == "completed")
+    assert assignment_cleared_index < completion_index
+    assert events[assignment_cleared_index]["target_status"] is None
+    assert events[completion_index]["event_type"] == "completion"
 
 
 def test_non_residents_cannot_use_resident_update_endpoint(tmp_path) -> None:
@@ -1968,6 +2585,168 @@ def test_resident_update_rejects_unknown_reason_codes(tmp_path) -> None:
     assert response.status_code == 422
     assert "resident_access_update" in response.text
     assert "resident_access_issue" in response.text
+
+
+def test_resident_update_requires_structured_reason_code(tmp_path) -> None:
+    app, client = build_client(tmp_path)
+
+    with client:
+        ids = lookup_ids(app)
+        switch_demo_user(client, "resident@fixhub.test")
+        job = create_job(client, location_id=ids["room_a14_location_id"])
+
+        response = client.post(
+            f"/api/jobs/{job['id']}/resident-update",
+            json={"message": "The access plan changed again."},
+        )
+
+    assert response.status_code == 422
+    assert "reason_code" in response.text
+
+
+def test_post_visit_resident_update_reasons_are_rejected_before_completion(tmp_path) -> None:
+    app, client = build_client(tmp_path)
+
+    with client:
+        ids = lookup_ids(app)
+        switch_demo_user(client, "resident@fixhub.test")
+        job = create_job(client, location_id=ids["room_a14_location_id"])
+
+        response = client.post(
+            f"/api/jobs/{job['id']}/resident-update",
+            json={
+                "message": "The issue is still active after the visit.",
+                "reason_code": "issue_still_present",
+            },
+        )
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "detail": "Post-visit resident updates are only allowed after completion or while a follow-up visit is already recorded"
+    }
+
+
+def test_completed_job_rejects_access_updates_until_reopened(tmp_path) -> None:
+    app, client = build_client(tmp_path)
+
+    with client:
+        ids = lookup_ids(app)
+        switch_demo_user(client, "resident@fixhub.test")
+        job = create_job(client, location_id=ids["room_a14_location_id"], title="Completed access mismatch")
+        complete_org_assigned_job(client, job["id"], assigned_org_id=ids["newcastle_plumbing_org_id"])
+
+        response = client.post(
+            f"/api/jobs/{job['id']}/resident-update",
+            json={
+                "message": "The access timing changed again after the job was closed.",
+                "reason_code": "resident_access_update",
+            },
+        )
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "detail": "Access updates must be recorded before cancellation or after the job is reopened"
+    }
+
+
+def test_scheduled_and_follow_up_statuses_keep_operations_owner_until_attendance_starts(tmp_path) -> None:
+    app, client = build_client(tmp_path)
+
+    with client:
+        ids = lookup_ids(app)
+        switch_demo_user(client, "resident@fixhub.test")
+        job = create_job(client, location_id=ids["room_a14_location_id"], title="Scheduled owner truth")
+
+        switch_demo_user(client, "coordinator@fixhub.test")
+        assign_response = client.patch(
+            f"/api/jobs/{job['id']}",
+            json={"assigned_org_id": str(ids["newcastle_plumbing_org_id"])},
+        )
+        assert assign_response.status_code == 200, assign_response.text
+
+        switch_demo_user(client, "triage@fixhub.test")
+        triage_response = client.patch(
+            f"/api/jobs/{job['id']}",
+            json={
+                "status": "triaged",
+                "event_message": "Reviewed the leak and confirmed the job is ready for booking",
+            },
+        )
+        assert triage_response.status_code == 200, triage_response.text
+
+        schedule_response = client.patch(
+            f"/api/jobs/{job['id']}",
+            json={
+                "status": "scheduled",
+                "event_message": "Booked plumber for Friday morning attendance",
+            },
+        )
+        assert schedule_response.status_code == 200, schedule_response.text
+
+        switch_demo_user(client, "contractor@fixhub.test")
+        in_progress_response = client.patch(
+            f"/api/jobs/{job['id']}",
+            json={
+                "status": "in_progress",
+                "event_message": "Contractor arrived on site and started diagnosing the leak",
+            },
+        )
+        assert in_progress_response.status_code == 200, in_progress_response.text
+
+        complete_response = client.patch(
+            f"/api/jobs/{job['id']}",
+            json={
+                "status": "completed",
+                "event_message": "Replaced the failed washer and confirmed the tap is no longer leaking",
+                "responsibility_stage": "execution",
+            },
+        )
+        assert complete_response.status_code == 200, complete_response.text
+
+        switch_demo_user(client, "triage@fixhub.test")
+        follow_up_response = client.patch(
+            f"/api/jobs/{job['id']}",
+            json={
+                "status": "follow_up_scheduled",
+                "reason_code": "resident_reported_recurrence",
+                "event_message": "Booked a return visit after the resident reported the leak had resumed",
+            },
+        )
+        assert follow_up_response.status_code == 200, follow_up_response.text
+
+        events = job_events(client, job["id"])
+
+    scheduled_events = [event for event in events if event["target_status"] == "scheduled"]
+    follow_up_events = [event for event in events if event["target_status"] == "follow_up_scheduled"]
+
+    assert scheduled_events[-1]["responsibility_stage"] == "coordination"
+    assert scheduled_events[-1]["responsibility_owner"] == "triage_officer"
+    assert follow_up_events[-1]["responsibility_stage"] == "coordination"
+    assert follow_up_events[-1]["responsibility_owner"] == "triage_officer"
+
+
+def test_resident_job_page_only_shows_lifecycle_valid_update_types(tmp_path) -> None:
+    app, client = build_client(tmp_path)
+
+    with client:
+        ids = lookup_ids(app)
+        switch_demo_user(client, "resident@fixhub.test")
+        open_job = create_job(client, location_id=ids["room_a14_location_id"], title="Open resident update options")
+        open_page = client.get(f"/resident/jobs/{open_job['id']}")
+
+        completed_job = create_job(client, location_id=ids["room_b8_location_id"], title="Completed resident update options")
+        complete_org_assigned_job(client, completed_job["id"], assigned_org_id=ids["newcastle_plumbing_org_id"])
+        completed_page = client.get(f"/resident/jobs/{completed_job['id']}")
+
+    assert open_page.status_code == 200
+    assert "General resident update" not in open_page.text
+    assert "Access update" in open_page.text
+    assert "Issue resolved after visit" not in open_page.text
+
+    assert completed_page.status_code == 200
+    assert "Access update" not in completed_page.text
+    assert "Issue still present after visit" in completed_page.text
+    assert "Issue resolved after visit" in completed_page.text
 
 
 def test_operations_pages_hide_controls_by_role(tmp_path) -> None:

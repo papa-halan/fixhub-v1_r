@@ -1,16 +1,16 @@
 # Documentation Index
 
-Last updated: `2026-04-04 20:05:00 +11:00`
+Last updated: `2026-04-04 22:30:00 +11:00`
 
 ## Document Metadata
 
-- Owner: `student-living-platform`
+- Owner: `fixhub-pilot`
 - Reviewer: `schema-test-automation`
 - Status: `active`
 
 ## Purpose
 
-This folder stores implementation-aligned notes for the current FixHub student-living pilot.
+This folder stores implementation-aligned notes for the current FixHub residence-operations pilot and its path toward broader civil-works coordination.
 
 ## Structure
 
@@ -25,8 +25,8 @@ This folder stores implementation-aligned notes for the current FixHub student-l
 
 ## Current Documentation Focus
 
-- README documents the migrations-first boot flow, signed-session auth, explicit demo vs normal startup, the seeded demo login roster, and the current org/location/job/event model including event-level assignment snapshots and stored location snapshots
-- the schema assessment records the corrected Phase 0.5 foundation: structured locations, same-org validation, resident-facing hierarchy labels, real login in normal mode, explicit demo gating, current workflow guards, stronger structured responsibility history, accountable direct dispatch, and truthful current-vs-historical contractor visibility
+- README documents the migrations-first boot flow, signed-session auth, explicit demo vs normal startup, the seeded demo login roster, and the current org/location/job/event model including event-level assignment snapshots, snapshot-backed current dispatch labels, stored location snapshots, and lifecycle-aware resident update rules
+- the schema assessment records the corrected Phase 0.5 foundation: structured locations, same-org validation, resident-facing hierarchy labels, real login in normal mode, explicit demo gating, current workflow guards, stronger structured responsibility history, accountable direct dispatch, truthful pre-attendance operations ownership, and current-vs-historical contractor visibility
 - the handoff context file captures the latest strategic planning, digital-twin positioning, roadmap, and GitHub backlog work
 - the UoN Student Living maintenance context log captures current real-world actor and workflow evidence so future FixHub modeling stays grounded in the university's actual operating process
 - architecture notes show how residents, operations roles, and contractors share the same timeline
@@ -35,7 +35,7 @@ This folder stores implementation-aligned notes for the current FixHub student-l
 
 ## Current Scope Boundary
 
-- implemented now: stabilization plus a truthful Phase 0.5 pilot foundation
+- implemented now: stabilization plus a truthful Phase 0.5 residence-operations coordination foundation
 - deferred: request -> work-order -> visit split, richer routing records, public reporting, enterprise auth, and broader CMMS features
 
 ## SD Practice Sanity Check

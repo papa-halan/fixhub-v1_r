@@ -5,12 +5,13 @@ from datetime import datetime, timezone
 import uuid
 
 from app.models import EventType, JobStatus, ResponsibilityOwner, ResponsibilityStage, UserRole
-from app.api.deps import serialize_related_job
+from app.api.deps import build_focus_counts, serialize_related_job
 from app.services import (
     apply_status_change,
     derive_assignment_projection,
     derive_coordination_projection,
     derive_job_status_from_events,
+    derive_visit_plan,
     latest_role_update,
     sync_job_status_from_events,
 )
@@ -59,8 +60,10 @@ class StubCreator:
 class StubAssignmentEvent(StubEvent):
     assigned_org_id: uuid.UUID | None = None
     assigned_org: object | None = None
+    assigned_org_name_snapshot: str | None = None
     assigned_contractor_user_id: uuid.UUID | None = None
     assigned_contractor: object | None = None
+    assigned_contractor_name_snapshot: str | None = None
 
 
 @dataclass
@@ -195,6 +198,35 @@ def test_coordination_projection_uses_status_timeline_and_assignment_context() -
     assert projection.responsibility_stage == "coordination"
     assert projection.responsibility_owner == "triage_officer"
     assert projection.latest_event_type == "schedule"
+    assert projection.latest_lifecycle_event_type == "schedule"
+
+
+def test_apply_status_change_marks_scheduled_and_follow_up_as_operations_owned_coordination_states() -> None:
+    actor = StubActor(role=UserRole.triage_officer)
+    scheduled_job = StubJob(status=JobStatus.triaged, events=[])
+    follow_up_job = StubJob(status=JobStatus.completed, events=[], assigned_org_id=uuid.uuid4())
+
+    scheduled_event = apply_status_change(
+        scheduled_job,
+        JobStatus.scheduled,
+        actor,
+        message="Booked plumber for Friday morning attendance",
+    )
+    follow_up_event = apply_status_change(
+        follow_up_job,
+        JobStatus.follow_up_scheduled,
+        actor,
+        message="Booked a return visit after recurrence",
+        reason_code="resident_reported_recurrence",
+    )
+
+    assert scheduled_event is not None
+    assert scheduled_event.responsibility_stage == ResponsibilityStage.coordination
+    assert scheduled_event.responsibility_owner == ResponsibilityOwner.triage_officer
+
+    assert follow_up_event is not None
+    assert follow_up_event.responsibility_stage == ResponsibilityStage.coordination
+    assert follow_up_event.responsibility_owner == ResponsibilityOwner.triage_officer
 
 
 def test_assignment_projection_prefers_explicit_assignment_events_over_drifted_job_row() -> None:
@@ -222,6 +254,37 @@ def test_assignment_projection_prefers_explicit_assignment_events_over_drifted_j
     assert assignment.assigned_org_name == "Newcastle Plumbing"
     assert assignment.assignee_scope == "organisation"
     assert assignment.assignee_label == "Newcastle Plumbing"
+
+
+def test_assignment_projection_uses_event_name_snapshots_when_live_relations_drift() -> None:
+    event_org_id = uuid.uuid4()
+    contractor_user_id = uuid.uuid4()
+    job = StubJob(
+        status=JobStatus.assigned,
+        assigned_org_id=event_org_id,
+        assigned_contractor_user_id=contractor_user_id,
+        assigned_org=StubAssignee(name="Renamed Plumbing Pty Ltd"),
+        assigned_contractor=StubAssignee(name="Renamed Devon"),
+        events=[
+            StubAssignmentEvent(
+                id=uuid.uuid4(),
+                created_at=datetime(2026, 4, 4, 10, 0, tzinfo=timezone.utc),
+                target_status=None,
+                event_type=EventType.assignment,
+                assigned_org_id=event_org_id,
+                assigned_org_name_snapshot="Newcastle Plumbing",
+                assigned_contractor_user_id=contractor_user_id,
+                assigned_contractor_name_snapshot="Devon Contractor",
+            )
+        ],
+    )
+
+    assignment = derive_assignment_projection(job, job.events)
+
+    assert assignment.assigned_org_name == "Newcastle Plumbing"
+    assert assignment.assigned_contractor_name == "Devon Contractor"
+    assert assignment.assignee_scope == "user"
+    assert assignment.assignee_label == "Devon Contractor"
 
 
 def test_coordination_projection_keeps_block_reason_visible_after_note_event() -> None:
@@ -254,6 +317,7 @@ def test_coordination_projection_keeps_block_reason_visible_after_note_event() -
     assert projection.detail == "awaiting_access"
     assert projection.owner_label == "Dispatch coordinator"
     assert projection.latest_event_type == "note"
+    assert projection.latest_lifecycle_event_type == "status_change"
     assert projection.responsibility_owner == "coordinator"
 
 
@@ -286,6 +350,7 @@ def test_coordination_projection_keeps_scheduled_detail_tied_to_schedule_event_a
     assert projection.detail == "Resident approved Friday morning access window"
     assert projection.owner_label == "Newcastle Plumbing"
     assert projection.latest_event_type == "note"
+    assert projection.latest_lifecycle_event_type == "schedule"
 
 
 def test_coordination_projection_shows_completion_detail_but_returns_next_owner_to_resident() -> None:
@@ -317,6 +382,53 @@ def test_coordination_projection_shows_completion_detail_but_returns_next_owner_
     assert projection.detail == "Tap washer replaced and sink tested with no further leak"
     assert projection.owner_label == "Resident"
     assert projection.latest_event_type == "note"
+    assert projection.latest_lifecycle_event_type == "completion"
+
+
+def test_assignment_projection_clears_current_assignee_after_explicit_assignment_end_event() -> None:
+    job = StubJob(
+        status=JobStatus.completed,
+        assigned_org_id=uuid.uuid4(),
+        assigned_org=StubAssignee(name="Drifted Row Org"),
+        events=[
+            StubAssignmentEvent(
+                id=uuid.uuid4(),
+                created_at=datetime(2026, 3, 21, 10, 0, tzinfo=timezone.utc),
+                target_status=None,
+                event_type=EventType.assignment,
+                message="Assigned Newcastle Plumbing",
+                assigned_org_id=uuid.uuid4(),
+                assigned_org_name_snapshot="Newcastle Plumbing",
+            ),
+            StubAssignmentEvent(
+                id=uuid.uuid4(),
+                created_at=datetime(2026, 3, 21, 11, 0, tzinfo=timezone.utc),
+                target_status=None,
+                event_type=EventType.assignment,
+                message="Assignment cleared",
+                assigned_org_id=None,
+                assigned_contractor_user_id=None,
+            ),
+            StubEvent(
+                id=uuid.uuid4(),
+                created_at=datetime(2026, 3, 21, 12, 0, tzinfo=timezone.utc),
+                target_status=JobStatus.completed,
+                event_type=EventType.completion,
+                message="Tap washer replaced and sink tested with no further leak",
+                responsibility_stage=ResponsibilityStage.execution,
+            ),
+        ],
+    )
+
+    assignment = derive_assignment_projection(job, job.events)
+    projection = derive_coordination_projection(job, job.events)
+
+    assert assignment.assigned_org_id is None
+    assert assignment.assignee_label is None
+    assert projection.status == JobStatus.completed
+    assert projection.headline == "Work marked complete"
+    assert projection.latest_event_type == "completion"
+    assert projection.latest_lifecycle_event_type == "completion"
 
 
 def test_coordination_projection_prefers_latest_structured_note_over_stale_status_headline() -> None:
@@ -374,7 +486,7 @@ def test_coordination_projection_labels_assignment_only_signal_explicitly() -> N
                 target_status=None,
                 event_type=EventType.assignment,
                 message="Reassigned Campus Maintenance",
-                responsibility_stage=ResponsibilityStage.triage,
+                responsibility_stage=ResponsibilityStage.coordination,
                 responsibility_owner=ResponsibilityOwner.coordinator,
                 assigned_org_id=uuid.uuid4(),
                 assigned_org=StubAssignee(name="Campus Maintenance"),
@@ -388,6 +500,7 @@ def test_coordination_projection_labels_assignment_only_signal_explicitly() -> N
     assert projection.headline == "Dispatch target updated without changing lifecycle state"
     assert projection.owner_label == "Dispatch coordinator"
     assert projection.detail == "Reassigned Campus Maintenance"
+    assert projection.responsibility_stage == "coordination"
 
 
 def test_latest_role_update_skips_generic_status_echoes_and_prefers_real_handoff_message() -> None:
@@ -490,3 +603,155 @@ def test_serialize_related_job_uses_event_derived_status_instead_of_row_cache() 
     assert related["status"] == "completed"
     assert related["status_label"] == "Completed"
     assert related["coordination_headline"] == "Work marked complete"
+
+
+def test_visit_plan_projection_flags_resident_access_note_newer_than_booking() -> None:
+    student_living = type("Org", (), {"name": "Student Living"})()
+    resident = type(
+        "Actor",
+        (),
+        {"role": UserRole.resident, "name": "Riley Resident", "organisation": student_living},
+    )()
+    triage = type(
+        "Actor",
+        (),
+        {"role": UserRole.triage_officer, "name": "Priya Property Manager", "organisation": student_living},
+    )()
+    schedule_event = StubEvent(
+        id=uuid.uuid4(),
+        created_at=datetime(2026, 4, 4, 10, 0, tzinfo=timezone.utc),
+        target_status=JobStatus.scheduled,
+        event_type=EventType.schedule,
+        message="Booked plumber for Friday 14:00-16:00 after the original resident access confirmation",
+        responsibility_stage=ResponsibilityStage.coordination,
+    )
+    schedule_event.actor_user = triage
+    access_event = StubEvent(
+        id=uuid.uuid4(),
+        created_at=datetime(2026, 4, 4, 11, 0, tzinfo=timezone.utc),
+        target_status=None,
+        event_type=EventType.note,
+        message="Please avoid 3pm because the room is locked for a welfare check.",
+        reason_code="resident_access_update",
+        responsibility_stage=ResponsibilityStage.coordination,
+    )
+    access_event.actor_user = resident
+    job = StubJob(status=JobStatus.scheduled, events=[schedule_event, access_event])
+
+    plan = derive_visit_plan(job, job.events)
+
+    assert plan is not None
+    assert plan.headline == "Resident access note is newer than the booked visit"
+    assert plan.booking_message == schedule_event.message
+    assert plan.access_message == access_event.message
+    assert plan.access_actor_label == "Riley Resident (Student Living)"
+
+
+def test_visit_plan_projection_keeps_access_blocker_visible_after_failed_attendance() -> None:
+    student_living = type("Org", (), {"name": "Student Living"})()
+    plumbing = type("Org", (), {"name": "Newcastle Plumbing"})()
+    triage = type(
+        "Actor",
+        (),
+        {"role": UserRole.triage_officer, "name": "Priya Property Manager", "organisation": student_living},
+    )()
+    contractor = type(
+        "Actor",
+        (),
+        {"role": UserRole.contractor, "name": "Devon Contractor", "organisation": plumbing},
+    )()
+    schedule_event = StubEvent(
+        id=uuid.uuid4(),
+        created_at=datetime(2026, 4, 4, 9, 0, tzinfo=timezone.utc),
+        target_status=JobStatus.scheduled,
+        event_type=EventType.schedule,
+        message="Booked plumber for Wednesday morning with plant room key collection at reception",
+        responsibility_stage=ResponsibilityStage.coordination,
+    )
+    schedule_event.actor_user = triage
+    blocked_event = StubEvent(
+        id=uuid.uuid4(),
+        created_at=datetime(2026, 4, 4, 12, 0, tzinfo=timezone.utc),
+        target_status=JobStatus.blocked,
+        event_type=EventType.status_change,
+        message="Arrived on site but the plant room was locked and no key handoff was arranged.",
+        reason_code="no_access",
+        responsibility_stage=ResponsibilityStage.execution,
+    )
+    blocked_event.actor_user = contractor
+    job = StubJob(status=JobStatus.blocked, events=[schedule_event, blocked_event])
+
+    plan = derive_visit_plan(job, job.events)
+
+    assert plan is not None
+    assert plan.headline == "Access arrangement is not ready for the next visit"
+    assert plan.blocker_message == blocked_event.message
+    assert plan.blocker_actor_label == "Devon Contractor (Newcastle Plumbing)"
+
+
+def test_build_focus_counts_surfaces_response_visit_and_repeat_risk() -> None:
+    counts = build_focus_counts(
+        [
+            {
+                "status": "blocked",
+                "pending_signal_at": datetime(2026, 4, 4, 8, 0, tzinfo=timezone.utc),
+                "visit_plan_headline": "Access arrangement is not ready for the next visit",
+                "operational_history_open_job_count": 2,
+            },
+            {
+                "status": "triaged",
+                "pending_signal_at": None,
+                "visit_plan_headline": "Attendance still needs a booked visit",
+                "operational_history_open_job_count": 0,
+            },
+            {
+                "status": "completed",
+                "pending_signal_at": None,
+                "visit_plan_headline": "Current visit plan is recorded",
+                "operational_history_open_job_count": 1,
+            },
+        ]
+    )
+
+    assert counts == {
+        "response_needed": 1,
+        "visit_attention": 2,
+        "repeat_open_work": 2,
+        "blocked": 1,
+    }
+
+
+def test_coordination_projection_treats_resident_resolution_confirmation_as_truthful_completion_signal() -> None:
+    student_living = type("Org", (), {"name": "Student Living"})()
+    resident = type(
+        "Actor",
+        (),
+        {"role": UserRole.resident, "name": "Riley Resident", "organisation": student_living},
+    )()
+    completion_event = StubEvent(
+        id=uuid.uuid4(),
+        created_at=datetime(2026, 4, 4, 9, 0, tzinfo=timezone.utc),
+        target_status=JobStatus.completed,
+        event_type=EventType.completion,
+        message="Replaced the cartridge and pressure-tested the line with no further leak",
+        responsibility_stage=ResponsibilityStage.execution,
+    )
+    resolution_event = StubEvent(
+        id=uuid.uuid4(),
+        created_at=datetime(2026, 4, 4, 11, 0, tzinfo=timezone.utc),
+        target_status=None,
+        event_type=EventType.note,
+        message="The shower has stayed dry since yesterday's repair.",
+        reason_code="resident_confirmed_resolved",
+        responsibility_stage=ResponsibilityStage.execution,
+        responsibility_owner=ResponsibilityOwner.resident,
+    )
+    resolution_event.actor_user = resident
+    job = StubJob(status=JobStatus.completed, events=[completion_event, resolution_event])
+
+    projection = derive_coordination_projection(job, job.events)
+
+    assert projection.status == JobStatus.completed
+    assert projection.headline == "Resident confirmed the issue is resolved after the visit"
+    assert projection.detail == "The shower has stayed dry since yesterday's repair."
+    assert projection.owner_label == "Resident"

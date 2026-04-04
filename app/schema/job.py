@@ -5,7 +5,7 @@ from datetime import datetime
 
 from pydantic import ValidationInfo, field_validator
 
-from app.models import EventType, JobStatus, OwnerScope, ResponsibilityOwner, ResponsibilityStage
+from app.models import EventType, JobStatus, OwnerScope, ReportChannel, ResponsibilityOwner, ResponsibilityStage
 from app.schema.base import SchemaModel, strip_non_blank
 
 
@@ -15,6 +15,8 @@ class JobCreate(SchemaModel):
     location_id: uuid.UUID
     location_detail_text: str | None = None
     asset_name: str | None = None
+    reported_for_user_id: uuid.UUID | None = None
+    intake_channel: ReportChannel | None = None
 
     @field_validator("title", "description")
     @classmethod
@@ -82,6 +84,12 @@ class JobRead(SchemaModel):
     owner_scope: OwnerScope | None = None
     created_by: uuid.UUID
     created_by_name: str
+    reported_for_user_id: uuid.UUID
+    reported_for_user_name: str
+    intake_channel: ReportChannel | None = None
+    intake_channel_label: str | None = None
+    intake_summary: str | None = None
+    reported_by_actor_label: str | None = None
     responsibility_owner: ResponsibilityOwner | None = None
     assigned_org_id: uuid.UUID | None = None
     assigned_org_name: str | None = None

@@ -44,6 +44,11 @@ class Event(Base):
         ForeignKey("users.id"),
         nullable=True,
     )
+    actor_name_snapshot: Mapped[str | None] = mapped_column(Text, nullable=True)
+    actor_role_snapshot: Mapped[str | None] = mapped_column(Text, nullable=True)
+    actor_org_name_snapshot: Mapped[str | None] = mapped_column(Text, nullable=True)
+    assigned_org_name_snapshot: Mapped[str | None] = mapped_column(Text, nullable=True)
+    assigned_contractor_name_snapshot: Mapped[str | None] = mapped_column(Text, nullable=True)
     location_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("locations.id"),
         nullable=True,
@@ -74,6 +79,8 @@ class Event(Base):
         ),
         nullable=True,
     )
+    location_snapshot: Mapped[str | None] = mapped_column(Text, nullable=True)
+    asset_snapshot: Mapped[str | None] = mapped_column(Text, nullable=True)
     message: Mapped[str] = mapped_column(Text, nullable=False)
     reason_code: Mapped[str | None] = mapped_column(Text, nullable=True)
     responsibility_stage: Mapped[ResponsibilityStage | None] = mapped_column(

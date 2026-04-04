@@ -12,6 +12,9 @@ RESIDENT_RECURRENCE_REASON_CODES = {
     ResidentUpdateReason.issue_still_present.value,
     ResidentUpdateReason.resident_reported_recurrence.value,
 }
+RESIDENT_RESOLUTION_REASON_CODES = {
+    ResidentUpdateReason.resident_confirmed_resolved.value,
+}
 RESIDENT_ACCESS_REASON_CODES = {
     ResidentUpdateReason.resident_access_update.value,
     ResidentUpdateReason.resident_access_issue.value,
@@ -345,6 +348,13 @@ def coordination_summary(job: Any, events: Iterable[Any]) -> CoordinationSummary
             next_step="Record the condition needed to bring the job back into triage or scheduling.",
         )
     if status == JobStatus.completed:
+        if latest_actor_role_value == "resident" and latest_event_reason in RESIDENT_RESOLUTION_REASON_CODES:
+            return CoordinationSummary(
+                headline="Resident confirmed the issue is resolved after the visit",
+                owner_label="Resident",
+                detail=getattr(latest_event, "message", None),
+                next_step="No immediate action is required unless the issue returns and needs a new coordination record.",
+            )
         if latest_actor_role_value == "resident" and latest_event_reason in RESIDENT_RECURRENCE_REASON_CODES:
             return CoordinationSummary(
                 headline="Resident says the issue is still active after completion",
@@ -424,6 +434,20 @@ def _assignment_projection_from_snapshot(
     )
 
 
+def _assignment_names_from_event(event: Any) -> tuple[str | None, str | None]:
+    assigned_org = getattr(event, "assigned_org", None)
+    assigned_contractor = getattr(event, "assigned_contractor", None)
+    assigned_org_name = getattr(event, "assigned_org_name_snapshot", None)
+    assigned_contractor_name = getattr(event, "assigned_contractor_name_snapshot", None)
+
+    if assigned_org_name is None:
+        assigned_org_name = getattr(assigned_org, "name", None)
+    if assigned_contractor_name is None:
+        assigned_contractor_name = getattr(assigned_contractor, "name", None)
+
+    return assigned_org_name, assigned_contractor_name
+
+
 def derive_assignment_projection(job: Any, events: Iterable[Any]) -> AssignmentProjection:
     ordered_events = sorted(events, key=_event_order_key)
 
@@ -431,13 +455,12 @@ def derive_assignment_projection(job: Any, events: Iterable[Any]) -> AssignmentP
         if getattr(event, "event_type", None) != "assignment":
             continue
 
-        assigned_org = getattr(event, "assigned_org", None)
-        assigned_contractor = getattr(event, "assigned_contractor", None)
+        assigned_org_name, assigned_contractor_name = _assignment_names_from_event(event)
         return _assignment_projection_from_snapshot(
             assigned_org_id=getattr(event, "assigned_org_id", None),
-            assigned_org_name=getattr(assigned_org, "name", None),
+            assigned_org_name=assigned_org_name,
             assigned_contractor_user_id=getattr(event, "assigned_contractor_user_id", None),
-            assigned_contractor_name=getattr(assigned_contractor, "name", None),
+            assigned_contractor_name=assigned_contractor_name,
         )
 
     assigned_org = getattr(job, "assigned_org", None)
@@ -521,6 +544,11 @@ def _pending_signal_copy(
     source: RoleUpdateProjection,
 ) -> tuple[str, str]:
     if source.actor_role == "resident":
+        if source.reason_code in RESIDENT_RESOLUTION_REASON_CODES:
+            return (
+                "Resident confirmed the visit resolved the issue",
+                "Keep the confirmation in the record and only re-open coordination if the issue returns.",
+            )
         if source.reason_code in RESIDENT_ACCESS_REASON_CODES:
             if owner_role == "contractor":
                 return (
@@ -608,6 +636,8 @@ def derive_pending_signal(job: Any, events: Iterable[Any]) -> PendingSignalProje
         source = _newer_role_update(latest_resident, [latest_operations, latest_contractor])
 
     if source is None:
+        return None
+    if source.actor_role == "resident" and source.reason_code in RESIDENT_RESOLUTION_REASON_CODES:
         return None
 
     headline, summary = _pending_signal_copy(owner_role=owner_role, status=status, source=source)

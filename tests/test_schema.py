@@ -143,6 +143,18 @@ def test_resident_update_create_only_accepts_structured_pilot_reason_codes() -> 
     assert payload.message == "Please avoid 1-2pm because the room is locked"
     assert payload.reason_code == ResidentUpdateReason.resident_access_update
 
+    resolved_payload = ResidentUpdateCreate(
+        message="The issue has stayed fixed since the last visit",
+        reason_code="resident_confirmed_resolved",
+    )
+
+    assert resolved_payload.reason_code == ResidentUpdateReason.resident_confirmed_resolved
+
+    with pytest.raises(ValidationError):
+        ResidentUpdateCreate(
+            message="Missing structured reason",
+        )
+
     with pytest.raises(ValidationError):
         ResidentUpdateCreate(
             message="Please avoid 1-2pm because the room is locked",
@@ -182,11 +194,15 @@ def test_phase_zero_point_five_model_columns_are_present_without_phase_one_field
 
     assert "organisation_id" in Job.__table__.c
     assert "location_detail_text" in Job.__table__.c
+    assert "asset_snapshot" in Job.__table__.c
+    assert "reported_for_user_id" in Job.__table__.c
     assert Job.__table__.c["organisation_id"].nullable is False
     assert "request_id" not in Job.__table__.c
     assert "assigned_org_id" in EventRead.model_fields
     assert "assigned_contractor_user_id" in EventRead.model_fields
     assert "action_required_summary" in JobRead.model_fields
+    assert "visit_plan_headline" in JobRead.model_fields
+    assert "visit_booking_message" in JobRead.model_fields
 
 
 def test_location_and_job_read_models_include_phase_zero_point_five_fields() -> None:
@@ -222,7 +238,9 @@ def test_location_and_job_read_models_include_phase_zero_point_five_fields() -> 
         responsibility_stage=None,
         owner_scope=None,
         created_by=uuid.uuid4(),
-        created_by_name="Riley Resident",
+        created_by_name="Fran Front Desk",
+        reported_for_user_id=uuid.uuid4(),
+        reported_for_user_name="Riley Resident",
         responsibility_owner=None,
         assigned_org_id=None,
         assigned_org_name=None,

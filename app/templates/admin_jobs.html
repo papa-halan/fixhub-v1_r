@@ -7,8 +7,11 @@
       <p class="eyebrow">Operations</p>
       <h1>Operations queue</h1>
     </div>
-    <p class="muted">{{ current_user.role_label }} view of intake, triage, dispatch, and operational handoffs.</p>
+    <div class="actions">
+      <a class="button" href="/admin/report">Log intake</a>
+    </div>
   </div>
+  <p class="muted">{{ current_user.role_label }} view of intake, triage, dispatch, and operational handoffs.</p>
 
   <div class="stats-grid">
     <div class="stat">
@@ -36,6 +39,25 @@
       <span>In progress</span>
     </div>
   </div>
+
+  <div class="stats-grid">
+    <div class="stat">
+      <strong>{{ focus_counts.response_needed }}</strong>
+      <span>Needs response</span>
+    </div>
+    <div class="stat">
+      <strong>{{ focus_counts.visit_attention }}</strong>
+      <span>Visit plan risk</span>
+    </div>
+    <div class="stat">
+      <strong>{{ focus_counts.repeat_open_work }}</strong>
+      <span>Repeat open work</span>
+    </div>
+    <div class="stat">
+      <strong>{{ focus_counts.blocked }}</strong>
+      <span>Blocked</span>
+    </div>
+  </div>
 </section>
 
 <section class="panel">
@@ -45,16 +67,35 @@
     <a class="job-card" href="/admin/jobs/{{ job.id }}">
       <span class="status-pill">{{ job.status_label }}</span>
       <h3>{{ job.title }}</h3>
-      <p class="muted">Resident: {{ job.created_by_name }}</p>
+      <p class="muted">Resident: {{ job.reported_for_user_name }}</p>
+      {% if job.intake_channel_label %}
+      <p class="muted">Intake: {{ job.intake_channel_label }}{% if job.reported_by_actor_label %} by {{ job.reported_by_actor_label }}{% endif %}</p>
+      {% endif %}
       <p>{{ job.coordination_headline }}</p>
       <p>{{ job.asset_name or "Asset not captured" }} - {{ job.location }}</p>
       <p class="muted">Next owner: {{ job.coordination_owner_label }}</p>
       {% if job.action_required_summary %}
       <p class="muted">Action needed now: {{ job.action_required_summary }}</p>
       {% endif %}
+      {% if job.visit_plan_headline %}
+      <p class="muted">Visit plan: {{ job.visit_plan_headline }}</p>
+      {% endif %}
+      {% if job.visit_booking_at %}
+      <p class="muted">Booked visit: {{ job.visit_booking_message }}{% if job.visit_booking_actor_label %} ({{ job.visit_booking_actor_label }}){% endif %} at {{ job.visit_booking_at|timestamp }}</p>
+      {% endif %}
+      {% if job.visit_blocker_at %}
+      <p class="muted">Access blocker: {{ job.visit_blocker_message }}{% if job.visit_blocker_actor_label %} ({{ job.visit_blocker_actor_label }}){% endif %} at {{ job.visit_blocker_at|timestamp }}</p>
+      {% endif %}
       {% if job.pending_signal_at %}
       <p class="muted">Response-needed signal: {{ job.pending_signal_headline }} from {{ job.pending_signal_actor_label }} at {{ job.pending_signal_at|timestamp }}</p>
       <p class="muted">{{ job.pending_signal_summary }}</p>
+      {% endif %}
+      {% if job.latest_operations_update_at %}
+      <p class="muted">Latest staff handoff: {{ job.latest_operations_update_message }}{% if job.latest_operations_update_actor_label %} ({{ job.latest_operations_update_actor_label }}){% endif %} at {{ job.latest_operations_update_at|timestamp }}</p>
+      {% endif %}
+      {% if job.operational_history_location_job_count %}
+      <p class="muted">Operational history: {{ job.operational_history_headline }}</p>
+      <p class="muted">{{ job.operational_history_summary }}</p>
       {% endif %}
       {% if job.latest_resident_update_at %}
       <p class="muted">Resident signal: {{ job.latest_resident_update_message }}{% if job.latest_resident_update_actor_label %} ({{ job.latest_resident_update_actor_label }}){% endif %} at {{ job.latest_resident_update_at|timestamp }}</p>

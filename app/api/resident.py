@@ -7,12 +7,14 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
 from app.api.deps import (
+    build_focus_counts,
     get_current_user,
     get_session,
     related_jobs_for_user,
     render_page,
     require_role,
     serialize_event,
+    serialize_job_for_user,
     serialize_job_with_history,
     visible_events,
     visible_job,
@@ -48,13 +50,14 @@ def resident_jobs_page(
     current_user: User = Depends(get_current_user),
 ):
     require_role(current_user, UserRole.resident)
-    jobs = [serialize_job(job) for job in visible_jobs(session, current_user, mine=True)]
+    jobs = [serialize_job_for_user(session, current_user, job=job) for job in visible_jobs(session, current_user, mine=True)]
     return render_page(
         request=request,
         session=session,
         current_user=current_user,
         template_name="resident_jobs.html",
         jobs=jobs,
+        focus_counts=build_focus_counts(jobs),
     )
 
 

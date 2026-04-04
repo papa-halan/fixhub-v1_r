@@ -39,12 +39,13 @@ class EventCreate(SchemaModel):
 
 class ResidentUpdateCreate(SchemaModel):
     message: str
-    reason_code: ResidentUpdateReason | None = None
+    reason_code: ResidentUpdateReason
 
     @field_validator("message")
     @classmethod
     def validate_message(cls, value: str, info: ValidationInfo) -> str:
         return strip_non_blank(value, info.field_name)
+
 
 class EventRead(SchemaModel):
     id: uuid.UUID
