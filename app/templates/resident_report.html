@@ -28,7 +28,7 @@
       <select name="location_id" {% if not location_catalog %}disabled{% endif %} required>
         <option value="">Choose a location</option>
         {% for location in location_catalog %}
-        <option value="{{ location.id }}">{{ location.name }}</option>
+        <option value="{{ location.id }}">{{ location.label }}</option>
         {% endfor %}
       </select>
     </label>

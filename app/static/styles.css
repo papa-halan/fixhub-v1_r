@@ -359,6 +359,10 @@ textarea {
   margin: -0.2rem 0 0;
 }
 
+.status-update-fields {
+  margin-bottom: 0.85rem;
+}
+
 .job-card p:last-child {
   margin-bottom: 0;
 }

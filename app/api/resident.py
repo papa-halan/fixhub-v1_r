@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import (
     get_current_user,
     get_session,
+    related_jobs_for_user,
     render_page,
     require_role,
     serialize_event,
@@ -18,7 +19,7 @@ from app.api.deps import (
     visible_jobs,
 )
 from app.models import User, UserRole
-from app.services import build_location_asset_catalog
+from app.services import build_location_asset_catalog, derive_coordination_projection
 
 
 router = APIRouter(prefix="/resident")
@@ -66,11 +67,14 @@ def resident_job_page(
 ):
     require_role(current_user, UserRole.resident)
     job = visible_job(session, current_user, job_id)
+    events = visible_events(session, job_id)
     return render_page(
         request=request,
         session=session,
         current_user=current_user,
         template_name="resident_job.html",
         job=serialize_job(job),
-        events=[serialize_event(event) for event in visible_events(session, job_id)],
+        events=[serialize_event(event) for event in events],
+        coordination=derive_coordination_projection(job, events),
+        related_jobs=related_jobs_for_user(session, current_user, job=job),
     )

@@ -3,11 +3,11 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import (
     clean_text,
+    contractor_has_current_assignment,
     get_current_user,
     get_session,
     serialize_event,
@@ -25,27 +25,27 @@ from app.models import (
     OwnerScope,
     Organisation,
     OrganisationType,
+    ResponsibilityOwner,
     ResponsibilityStage,
     User,
     UserRole,
 )
-from app.schema import EventCreate, EventRead, JobCreate, JobRead, JobUpdate, UserRead
-from app.services.catalog import is_reportable_location
+from app.schema import EventCreate, EventRead, JobCreate, JobRead, JobUpdate, ResidentUpdateCreate, UserRead
+from app.services.catalog import is_reportable_location, location_label
 from app.services import (
     ASSIGNEE_REQUIRED_STATUSES,
     ASSIGNMENT_ROLES,
-    COORDINATION_ROLES,
     EventSpec,
-    STATUS_EVENT_MESSAGES,
-    TRIAGE_ROLES,
     append_event,
     apply_status_change,
     assignee_label,
     assignee_scope,
-    fallback_status_for_unassigned,
     find_asset_by_name,
     job_has_assignee,
+    sync_job_assignment_from_events,
     sync_job_status_from_events,
+    validate_assignment_clear_requires_explicit_status,
+    validate_assignment_change_requires_explicit_status,
 )
 
 
@@ -87,7 +87,7 @@ def create_job(
         title=clean_text(payload.title, "title"),
         description=clean_text(payload.description, "description"),
         organisation_id=current_user.organisation_id,
-        location_snapshot=location.name,
+        location_snapshot=location_label(location),
         location_detail_text=payload.location_detail_text,
         location_id=location.id,
         asset_id=asset.id if asset is not None else None,
@@ -131,9 +131,7 @@ def get_job(
 def build_assignment_events(
     *,
     job: Job,
-    previous_label: str | None,
     previous_scope,
-    explicit_status_change: bool,
 ) -> list[EventSpec]:
     events: list[EventSpec] = []
     current_scope = assignee_scope(job)
@@ -146,42 +144,24 @@ def build_assignment_events(
                 event_type=EventType.assignment,
                 responsibility_stage=ResponsibilityStage.triage,
                 owner_scope=previous_scope,
+                assigned_org_id=None,
+                assigned_contractor_user_id=None,
             )
         )
-        if not explicit_status_change:
-            fallback_status = fallback_status_for_unassigned(job)
-            if job.status != fallback_status:
-                events.append(
-                    EventSpec(
-                        message=STATUS_EVENT_MESSAGES[fallback_status],
-                        event_type=EventType.status_change,
-                        target_status=fallback_status,
-                        responsibility_stage=ResponsibilityStage.triage
-                        if fallback_status == JobStatus.triaged
-                        else ResponsibilityStage.reception,
-                    )
-                )
         return events
 
-    message = f"{'Reassigned' if previous_label else 'Assigned'} {current_label}"
+    message = "Assigned" if previous_scope is None else "Reassigned"
+    message = f"{message} {current_label}"
     events.append(
         EventSpec(
             message=message,
             event_type=EventType.assignment,
             responsibility_stage=ResponsibilityStage.triage,
             owner_scope=current_scope,
+            assigned_org_id=job.assigned_org_id,
+            assigned_contractor_user_id=job.assigned_contractor_user_id,
         )
     )
-    if not explicit_status_change and job.status == JobStatus.new:
-        events.append(
-            EventSpec(
-                message=STATUS_EVENT_MESSAGES[JobStatus.assigned],
-                event_type=EventType.status_change,
-                target_status=JobStatus.assigned,
-                responsibility_stage=ResponsibilityStage.triage,
-                owner_scope=current_scope,
-            )
-        )
     return events
 
 
@@ -210,13 +190,6 @@ def apply_assignment_change(
 
     if org_field_present and requested_org_id is not None and not user_field_present:
         requested_contractor_user_id = None
-    if user_field_present and requested_contractor_user_id is not None and not org_field_present:
-        requested_org_id = None
-    if requested_org_id is not None and requested_contractor_user_id is not None:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="assigned_org_id and assigned_contractor_user_id are mutually exclusive",
-        )
 
     if job.status == JobStatus.completed and not explicit_status_change:
         if requested_org_id is not None or requested_contractor_user_id is not None:
@@ -231,8 +204,14 @@ def apply_assignment_change(
     if not assignment_changed:
         return []
 
+    validate_assignment_change_requires_explicit_status(job, explicit_status_change=explicit_status_change)
+    validate_assignment_clear_requires_explicit_status(
+        job,
+        explicit_status_change=explicit_status_change,
+        will_have_assignee=requested_org_id is not None or requested_contractor_user_id is not None,
+    )
+
     previous_scope = assignee_scope(job)
-    previous_label = assignee_label(job)
     organisation = None
     contractor_user = None
 
@@ -255,6 +234,26 @@ def apply_assignment_change(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Only contractor users can be assigned directly",
             )
+        contractor_org = contractor_user.organisation
+        if contractor_org is None or contractor_org.type != OrganisationType.contractor:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="Direct contractors must belong to a contractor organisation",
+            )
+        if requested_org_id is not None and requested_org_id != contractor_org.id:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="Direct contractor assignment must use the contractor's organisation",
+            )
+        requested_org_id = contractor_org.id
+        organisation = contractor_org
+
+    if requested_contractor_user_id is None and user_field_present and not org_field_present:
+        requested_org_id = job.assigned_org_id
+        organisation = job.assigned_org
+
+    if requested_org_id is not None and organisation is None:
+        organisation = session.get(Organisation, requested_org_id)
 
     job.assigned_org = organisation
     job.assigned_contractor = contractor_user
@@ -263,9 +262,7 @@ def apply_assignment_change(
 
     events = build_assignment_events(
         job=job,
-        previous_label=previous_label,
         previous_scope=previous_scope,
-        explicit_status_change=explicit_status_change,
     )
 
     requested_status = changes.get("status")
@@ -286,21 +283,34 @@ def update_job(
     current_user: User = Depends(get_current_user),
 ):
     job = visible_job(session, current_user, job_id)
+    sync_job_assignment_from_events(job)
+    sync_job_status_from_events(job)
     changes = payload.model_dump(exclude_unset=True)
     explicit_status_change = "status" in changes
+    transition_event_message = changes.get("event_message")
     transition_reason_code = changes.get("reason_code")
     transition_stage = changes.get("responsibility_stage")
     transition_scope = changes.get("owner_scope")
+    transition_owner = changes.get("responsibility_owner")
 
     if current_user.role == UserRole.resident:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Residents cannot update jobs")
+    if current_user.role == UserRole.contractor and not contractor_has_current_assignment(job, current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the currently assigned contractor can update this job",
+        )
 
     if not explicit_status_change and any(
-        key in changes for key in ("reason_code", "responsibility_stage", "owner_scope")
+        key in changes
+        for key in ("event_message", "reason_code", "responsibility_stage", "owner_scope", "responsibility_owner")
     ):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="reason_code, responsibility_stage, and owner_scope require a status change",
+            detail=(
+                "event_message, reason_code, responsibility_stage, owner_scope, and "
+                "responsibility_owner require a status change"
+            ),
         )
 
     messages = apply_assignment_change(
@@ -316,9 +326,11 @@ def update_job(
             job,
             changes["status"],
             current_user,
+            message=transition_event_message,
             reason_code=transition_reason_code,
             responsibility_stage=transition_stage,
             owner_scope=transition_scope,
+            responsibility_owner=transition_owner,
         )
         if status_event is not None:
             messages.append(status_event)
@@ -335,6 +347,8 @@ def update_job(
             responsibility_stage=spec.responsibility_stage,
             owner_scope=spec.owner_scope,
             responsibility_owner=spec.responsibility_owner,
+            assigned_org_id=spec.assigned_org_id,
+            assigned_contractor_user_id=spec.assigned_contractor_user_id,
         )
     if messages:
         sync_job_status_from_events(job)
@@ -353,6 +367,40 @@ def get_job_events(
     return [serialize_event(event) for event in visible_events(session, job_id)]
 
 
+@router.post("/jobs/{job_id}/resident-update", response_model=EventRead, status_code=status.HTTP_201_CREATED)
+def add_resident_update(
+    job_id: uuid.UUID,
+    payload: ResidentUpdateCreate,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    job = visible_job(session, current_user, job_id)
+    if current_user.role != UserRole.resident:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only residents can add resident updates")
+    reason_code = payload.reason_code
+    responsibility_stage = ResponsibilityStage.reception
+    responsibility_owner = ResponsibilityOwner.reception_admin
+    if reason_code == "resident_access_update":
+        responsibility_stage = ResponsibilityStage.coordination
+        responsibility_owner = ResponsibilityOwner.triage_officer
+    elif reason_code in {"resident_access_issue", "issue_still_present", "resident_reported_recurrence"}:
+        responsibility_stage = ResponsibilityStage.triage
+        responsibility_owner = ResponsibilityOwner.triage_officer
+    event = append_event(
+        session,
+        job=job,
+        actor=current_user,
+        message=clean_text(payload.message, "message"),
+        event_type=EventType.note,
+        reason_code=reason_code,
+        responsibility_stage=responsibility_stage,
+        owner_scope=OwnerScope.user,
+        responsibility_owner=responsibility_owner,
+    )
+    session.commit()
+    return serialize_event(event)
+
+
 @router.post("/jobs/{job_id}/events", response_model=EventRead, status_code=status.HTTP_201_CREATED)
 def add_event(
     job_id: uuid.UUID,
@@ -363,12 +411,21 @@ def add_event(
     job = visible_job(session, current_user, job_id)
     if current_user.role == UserRole.resident:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Residents cannot add timeline events")
+    if current_user.role == UserRole.contractor and not contractor_has_current_assignment(job, current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the currently assigned contractor can update this job",
+        )
     event = append_event(
         session,
         job=job,
         actor=current_user,
         message=clean_text(payload.message, "message"),
         event_type=EventType.note,
+        reason_code=payload.reason_code,
+        responsibility_stage=payload.responsibility_stage,
+        owner_scope=payload.owner_scope,
+        responsibility_owner=payload.responsibility_owner,
     )
     session.commit()
     return serialize_event(event)

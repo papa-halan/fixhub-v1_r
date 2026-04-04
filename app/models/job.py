@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import CheckConstraint, DateTime, Enum, ForeignKey, Index, Text, func
+from sqlalchemy import DateTime, Enum, ForeignKey, Index, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, created_timestamp, uuid_pk
@@ -21,10 +21,6 @@ if TYPE_CHECKING:
 class Job(Base):
     __tablename__ = "jobs"
     __table_args__ = (
-        CheckConstraint(
-            "NOT (assigned_org_id IS NOT NULL AND assigned_contractor_user_id IS NOT NULL)",
-            name="ck_jobs_single_assignee",
-        ),
         Index("ix_jobs_created_by_created_at", "created_by", "created_at"),
         Index("ix_jobs_assigned_org_status", "assigned_org_id", "status"),
         Index("ix_jobs_assigned_contractor_status", "assigned_contractor_user_id", "status"),

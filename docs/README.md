@@ -1,6 +1,6 @@
 # Documentation Index
 
-Last updated: `2026-03-22 17:40:31 +11:00`
+Last updated: `2026-04-04 20:05:00 +11:00`
 
 ## Document Metadata
 
@@ -10,7 +10,7 @@ Last updated: `2026-03-22 17:40:31 +11:00`
 
 ## Purpose
 
-This folder stores implementation-aligned notes for the current FixHub MVP.
+This folder stores implementation-aligned notes for the current FixHub student-living pilot.
 
 ## Structure
 
@@ -25,16 +25,17 @@ This folder stores implementation-aligned notes for the current FixHub MVP.
 
 ## Current Documentation Focus
 
-- README documents the migrations-first boot flow, signed-session auth, explicit demo vs normal startup, the seeded demo login roster, and the current org/location/job/event model
-- the schema assessment records the corrected Phase 0.5 foundation: structured locations, same-org validation, real login in normal mode, explicit demo gating, and current workflow guards
+- README documents the migrations-first boot flow, signed-session auth, explicit demo vs normal startup, the seeded demo login roster, and the current org/location/job/event model including event-level assignment snapshots and stored location snapshots
+- the schema assessment records the corrected Phase 0.5 foundation: structured locations, same-org validation, resident-facing hierarchy labels, real login in normal mode, explicit demo gating, current workflow guards, stronger structured responsibility history, accountable direct dispatch, and truthful current-vs-historical contractor visibility
 - the handoff context file captures the latest strategic planning, digital-twin positioning, roadmap, and GitHub backlog work
 - the UoN Student Living maintenance context log captures current real-world actor and workflow evidence so future FixHub modeling stays grounded in the university's actual operating process
 - architecture notes show how residents, operations roles, and contractors share the same timeline
 - the changelog records what changed and how it was verified
+- dead legacy module aliases or stale claims should be removed instead of being preserved as implied future architecture
 
 ## Current Scope Boundary
 
-- implemented now: stabilization plus Phase 0.5 foundation
+- implemented now: stabilization plus a truthful Phase 0.5 pilot foundation
 - deferred: request -> work-order -> visit split, richer routing records, public reporting, enterprise auth, and broader CMMS features
 
 ## SD Practice Sanity Check

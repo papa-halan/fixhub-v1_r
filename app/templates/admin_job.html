@@ -12,6 +12,26 @@
           <strong>{{ job.status_label }}</strong>
         </div>
         <div class="meta-item">
+          <span>Current coordination</span>
+          <strong>{{ job.coordination_headline }}</strong>
+        </div>
+        <div class="meta-item">
+          <span>Next owner</span>
+          <strong>{{ job.coordination_owner_label }}</strong>
+        </div>
+        {% if job.action_required_summary %}
+        <div class="meta-item">
+          <span>Action needed now</span>
+          <strong>{{ job.action_required_summary }}</strong>
+        </div>
+        {% endif %}
+        {% if job.coordination_detail %}
+        <div class="meta-item">
+          <span>Operational detail</span>
+          <strong>{{ job.coordination_detail }}</strong>
+        </div>
+        {% endif %}
+        <div class="meta-item">
           <span>Resident</span>
           <strong>{{ job.created_by_name }}</strong>
         </div>
@@ -33,7 +53,81 @@
           <span>Description</span>
           <strong>{{ job.description }}</strong>
         </div>
+        {% if job.latest_event_at %}
+        <div class="meta-item">
+          <span>Latest update</span>
+          <strong>{{ job.latest_event_at|timestamp }}{% if job.latest_event_actor_label %} by {{ job.latest_event_actor_label }}{% endif %}</strong>
+        </div>
+        {% endif %}
       </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-header">
+        <h2>Current coordination signal</h2>
+        <p>{{ coordination.headline }}</p>
+      </div>
+      <div class="meta-list">
+        <div class="meta-item">
+          <span>Next owner</span>
+          <strong>{{ coordination.owner_label }}</strong>
+        </div>
+        {% if coordination.detail %}
+        <div class="meta-item">
+          <span>Operational detail</span>
+          <strong>{{ coordination.detail }}</strong>
+        </div>
+        {% endif %}
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-header">
+        <h2>Cross-role updates</h2>
+        <p>Use the latest resident and field signals before moving triage or dispatch.</p>
+      </div>
+      <div class="meta-list">
+        <div class="meta-item">
+          <span>Resident signal</span>
+          <strong>
+            {% if job.latest_resident_update_at %}
+            {{ job.latest_resident_update_message }}{% if job.latest_resident_update_actor_label %} ({{ job.latest_resident_update_actor_label }}){% endif %} at {{ job.latest_resident_update_at|timestamp }}
+            {% else %}
+            No resident update yet
+            {% endif %}
+          </strong>
+        </div>
+        <div class="meta-item">
+          <span>Field progress</span>
+          <strong>
+            {% if job.latest_contractor_update_at %}
+            {{ job.latest_contractor_update_message }}{% if job.latest_contractor_update_actor_label %} ({{ job.latest_contractor_update_actor_label }}){% endif %} at {{ job.latest_contractor_update_at|timestamp }}
+            {% else %}
+            No contractor update yet
+            {% endif %}
+          </strong>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-header">
+        <h2>Repeat history at this location</h2>
+        <p>Use prior jobs here to spot recurring failures before treating this as an isolated ticket.</p>
+      </div>
+      {% if related_jobs %}
+      <div class="meta-list">
+        {% for related_job in related_jobs %}
+        <div class="meta-item">
+          <span>{{ related_job.match_label }}</span>
+          <strong>{{ related_job.title }} · {{ related_job.status_label }}</strong>
+          <span class="muted">{{ related_job.coordination_headline }}</span>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p class="muted">No earlier visible jobs at this location yet.</p>
+      {% endif %}
     </section>
 
     {% if can_change_assignment %}
@@ -57,11 +151,11 @@
           <select name="assigned_contractor_user_id">
             <option value="">No direct contractor</option>
             {% for contractor in contractor_users %}
-            <option value="{{ contractor.id }}" {% if contractor.id == job.assigned_contractor_user_id %}selected{% endif %}>{{ contractor.name }}{% if contractor.organisation_name %} ({{ contractor.organisation_name }}){% endif %}</option>
+            <option value="{{ contractor.id }}" data-organisation-id="{{ contractor.organisation_id }}" {% if contractor.id == job.assigned_contractor_user_id %}selected{% endif %}>{{ contractor.name }}{% if contractor.organisation_name %} ({{ contractor.organisation_name }}){% endif %}</option>
             {% endfor %}
           </select>
         </label>
-        <p class="muted form-helper">Choose either an organisation or a direct contractor. Clearing both removes the dispatch target.</p>
+        <p class="muted form-helper">Choosing a direct contractor keeps that contractor's organisation attached for accountable dispatch. Clear both fields to remove the dispatch target.</p>
         <div class="actions">
           <button class="button" type="submit">Save dispatch</button>
         </div>
@@ -81,25 +175,24 @@
     <section class="panel">
       <div class="panel-header">
         <h2>Workflow controls</h2>
-        <p>Front desk can add notes here. Triage and dispatch controls only appear for the roles that own them.</p>
+        <p>Record the coordination update that the next team needs before moving the workflow.</p>
       </div>
-      {% if can_mark_assigned or can_manage_triage or can_manage_coordination %}
+      <div class="form-grid status-update-fields">
+        <label>
+          Workflow update
+          <textarea id="status-message" name="event_message" placeholder="resident confirmed access for Tuesday 10-12 and contractor was booked"></textarea>
+        </label>
+        <label>
+          Reason or handoff code
+          <input id="status-reason" name="reason_code" placeholder="awaiting_resident_access, resident_reported_recurrence, urgent_safety_review">
+        </label>
+      </div>
+      <p class="muted form-helper">Use the workflow update for the operational detail people would otherwise chase over calls or email.</p>
+      {% if status_actions %}
       <div class="actions">
-        {% if can_mark_assigned %}
-        <button class="button secondary" data-status="assigned" type="button">Mark assigned</button>
-        {% endif %}
-        {% if can_manage_triage %}
-        <button class="button secondary" data-status="triaged" type="button">Mark triaged</button>
-        <button class="button secondary" data-status="scheduled" type="button">Schedule visit</button>
-        <button class="button secondary" data-status="follow_up_scheduled" type="button">Schedule follow-up</button>
-        {% endif %}
-        {% if can_manage_triage or can_manage_coordination %}
-        <button class="button secondary" data-status="on_hold" type="button">Put on hold</button>
-        {% endif %}
-        {% if can_manage_coordination %}
-        <button class="button secondary" data-status="escalated" type="button">Escalate</button>
-        <button class="button secondary" data-status="reopened" type="button">Reopen</button>
-        {% endif %}
+        {% for action in status_actions %}
+        <button class="button secondary" data-status="{{ action.status.value }}" type="button">{{ action.label }}</button>
+        {% endfor %}
       </div>
       {% else %}
       <p class="muted">This role can add timeline notes, but triage and dispatch are handled by other operations roles.</p>
@@ -117,6 +210,31 @@
           Message
           <textarea name="message" placeholder="contractor confirmed tomorrow visit" required></textarea>
         </label>
+        <label>
+          Reason or handoff code
+          <input name="reason_code" placeholder="awaiting_access, awaiting_parts, resident_contacted">
+        </label>
+        <label>
+          Coordination stage
+          <select name="responsibility_stage">
+            <option value="">No stage change</option>
+            <option value="reception">Reception</option>
+            <option value="triage">Triage</option>
+            <option value="coordination">Coordination</option>
+            <option value="execution">Execution</option>
+          </select>
+        </label>
+        <label>
+          Next owner
+          <select name="responsibility_owner">
+            <option value="">Keep current owner</option>
+            <option value="reception_admin">Front desk</option>
+            <option value="triage_officer">Property manager</option>
+            <option value="coordinator">Dispatch coordinator</option>
+            <option value="contractor">Contractor</option>
+            <option value="resident">Resident</option>
+          </select>
+        </label>
         <p class="muted form-helper">Examples: access confirmed for Tuesday, awaiting replacement part, follow-up visit approved.</p>
         <div class="actions">
           <button class="button ghost" type="submit">Add note</button>
@@ -133,13 +251,13 @@
   const reloadPage = () => window.location.reload();
 
   FixHub.wireJsonForm(document.getElementById("assign-form"), async (formData) => {
+    const contractorSelect = document.querySelector('select[name="assigned_contractor_user_id"]');
+    const contractorOption = contractorSelect.selectedOptions[0];
     const assignedOrgId = formData.get("assigned_org_id");
     const assignedContractorUserId = formData.get("assigned_contractor_user_id");
-    if (assignedOrgId && assignedContractorUserId) {
-      throw new Error("Choose either a contractor organisation or a direct contractor.");
-    }
+    const contractorOrgId = contractorOption?.dataset.organisationId || "";
     await FixHub.sendJson("/api/jobs/{{ job.id }}", "PATCH", {
-      assigned_org_id: assignedOrgId === "" ? null : assignedOrgId,
+      assigned_org_id: assignedContractorUserId === "" ? (assignedOrgId === "" ? null : assignedOrgId) : contractorOrgId,
       assigned_contractor_user_id: assignedContractorUserId === "" ? null : assignedContractorUserId,
     });
     reloadPage();
@@ -148,6 +266,9 @@
   FixHub.wireJsonForm(document.getElementById("event-form"), async (formData) => {
     await FixHub.sendJson("/api/jobs/{{ job.id }}/events", "POST", {
       message: formData.get("message"),
+      reason_code: formData.get("reason_code") || null,
+      responsibility_stage: formData.get("responsibility_stage") || null,
+      responsibility_owner: formData.get("responsibility_owner") || null,
     });
     reloadPage();
   });
@@ -155,22 +276,26 @@
   document.querySelectorAll("[data-status]").forEach((button) => {
     button.addEventListener("click", async () => {
       const feedback = document.getElementById("status-feedback");
+      const messageField = document.getElementById("status-message");
+      const reasonField = document.getElementById("status-reason");
+      const statusActions = {{ status_actions | tojson }};
+      const action = statusActions.find((entry) => entry.status === button.dataset.status);
       feedback.textContent = "";
       try {
         const payload = { status: button.dataset.status };
-        const statusesRequiringReason = new Set([
-          "on_hold",
-          "cancelled",
-          "reopened",
-          "follow_up_scheduled",
-          "escalated",
-        ]);
-        if (statusesRequiringReason.has(button.dataset.status)) {
-          const reasonCode = window.prompt("Enter a reason code for this transition:");
-          if (reasonCode === null) {
-            return;
-          }
-          payload.reason_code = reasonCode.trim();
+        const reasonCode = reasonField.value.trim();
+        const eventMessage = messageField.value.trim();
+        if (action?.requires_reason && !reasonCode) {
+          throw new Error("Add a reason or handoff code before using this transition.");
+        }
+        if (action?.requires_message && !eventMessage) {
+          throw new Error("Add a workflow update before using this transition.");
+        }
+        if (reasonCode) {
+          payload.reason_code = reasonCode;
+        }
+        if (eventMessage) {
+          payload.event_message = eventMessage;
         }
         await FixHub.sendJson("/api/jobs/{{ job.id }}", "PATCH", payload);
         reloadPage();

@@ -43,18 +43,18 @@ STATUS_LABELS = {
     JobStatus.escalated.value: "Escalated",
 }
 STATUS_EVENT_MESSAGES = {
-    JobStatus.new: "Moved job back to new",
-    JobStatus.assigned: "Marked job assigned",
-    JobStatus.triaged: "Marked job triaged",
-    JobStatus.scheduled: "Scheduled site visit",
-    JobStatus.in_progress: "Marked job in progress",
-    JobStatus.on_hold: "Placed job on hold",
-    JobStatus.blocked: "Marked job blocked",
-    JobStatus.completed: "Marked job completed",
-    JobStatus.cancelled: "Cancelled job",
-    JobStatus.reopened: "Reopened job",
-    JobStatus.follow_up_scheduled: "Scheduled follow-up visit",
-    JobStatus.escalated: "Escalated job for review",
+    JobStatus.new: "Returned job to intake review",
+    JobStatus.assigned: "Dispatch target recorded",
+    JobStatus.triaged: "Triage review recorded",
+    JobStatus.scheduled: "Visit scheduling recorded",
+    JobStatus.in_progress: "Contractor attendance recorded",
+    JobStatus.on_hold: "Hold recorded",
+    JobStatus.blocked: "Execution issue recorded",
+    JobStatus.completed: "Completion recorded",
+    JobStatus.cancelled: "Cancellation recorded",
+    JobStatus.reopened: "Reopened after prior completion",
+    JobStatus.follow_up_scheduled: "Follow-up visit recorded",
+    JobStatus.escalated: "Escalation recorded",
 }
 ASSIGNEE_REQUIRED_STATUSES = {
     JobStatus.assigned,
@@ -64,6 +64,12 @@ ASSIGNEE_REQUIRED_STATUSES = {
     JobStatus.completed,
     JobStatus.follow_up_scheduled,
 }
+ACTIVE_ASSIGNMENT_STATUSES = {
+    JobStatus.scheduled,
+    JobStatus.in_progress,
+    JobStatus.blocked,
+    JobStatus.follow_up_scheduled,
+}
 REASON_REQUIRED_STATUSES = {
     JobStatus.on_hold,
     JobStatus.blocked,
@@ -71,6 +77,12 @@ REASON_REQUIRED_STATUSES = {
     JobStatus.reopened,
     JobStatus.follow_up_scheduled,
     JobStatus.escalated,
+}
+MESSAGE_REQUIRED_STATUSES = {
+    JobStatus.scheduled,
+    JobStatus.in_progress,
+    JobStatus.completed,
+    *REASON_REQUIRED_STATUSES,
 }
 DEFAULT_STAGE_BY_STATUS = {
     JobStatus.new: ResponsibilityStage.reception,
@@ -86,12 +98,39 @@ DEFAULT_STAGE_BY_STATUS = {
     JobStatus.follow_up_scheduled: ResponsibilityStage.coordination,
     JobStatus.escalated: ResponsibilityStage.triage,
 }
+DEFAULT_RESPONSIBILITY_OWNER_BY_STATUS = {
+    JobStatus.new: ResponsibilityOwner.reception_admin,
+    JobStatus.assigned: ResponsibilityOwner.triage_officer,
+    JobStatus.triaged: ResponsibilityOwner.triage_officer,
+    JobStatus.scheduled: ResponsibilityOwner.contractor,
+    JobStatus.in_progress: ResponsibilityOwner.contractor,
+    JobStatus.on_hold: ResponsibilityOwner.triage_officer,
+    JobStatus.blocked: ResponsibilityOwner.coordinator,
+    JobStatus.completed: ResponsibilityOwner.resident,
+    JobStatus.cancelled: ResponsibilityOwner.coordinator,
+    JobStatus.reopened: ResponsibilityOwner.triage_officer,
+    JobStatus.follow_up_scheduled: ResponsibilityOwner.contractor,
+    JobStatus.escalated: ResponsibilityOwner.coordinator,
+}
 EVENT_TYPE_BY_STATUS = {
     JobStatus.assigned: EventType.assignment,
     JobStatus.scheduled: EventType.schedule,
     JobStatus.completed: EventType.completion,
     JobStatus.follow_up_scheduled: EventType.follow_up,
     JobStatus.escalated: EventType.escalation,
+}
+STATUS_ACTION_LABELS = {
+    JobStatus.assigned: "Mark assigned",
+    JobStatus.triaged: "Mark triaged",
+    JobStatus.scheduled: "Schedule visit",
+    JobStatus.in_progress: "Start work",
+    JobStatus.on_hold: "Put on hold",
+    JobStatus.blocked: "Mark blocked",
+    JobStatus.completed: "Mark completed",
+    JobStatus.cancelled: "Cancel job",
+    JobStatus.reopened: "Reopen",
+    JobStatus.follow_up_scheduled: "Schedule follow-up",
+    JobStatus.escalated: "Escalate",
 }
 ALLOWED_STATUS_CHANGES = {
     JobStatus.new: {JobStatus.assigned, JobStatus.triaged, JobStatus.cancelled},
@@ -173,6 +212,7 @@ ROLE_GROUPS_BY_TARGET = {
     JobStatus.escalated: COORDINATION_ROLES,
     JobStatus.new: ASSIGNMENT_ROLES,
 }
+UNSET = object()
 
 
 @dataclass(frozen=True)
@@ -184,6 +224,16 @@ class EventSpec:
     responsibility_stage: ResponsibilityStage | None = None
     owner_scope: OwnerScope | None = None
     responsibility_owner: ResponsibilityOwner | None = None
+    assigned_org_id: object | None = UNSET
+    assigned_contractor_user_id: object | None = UNSET
+
+
+@dataclass(frozen=True)
+class StatusAction:
+    status: JobStatus
+    label: str
+    requires_message: bool
+    requires_reason: bool
 
 
 def role_label(role: UserRole | str | None) -> str | None:
@@ -210,6 +260,38 @@ def status_label(status: JobStatus | str | None) -> str | None:
         return None
     status_value = status.value if isinstance(status, JobStatus) else status
     return STATUS_LABELS.get(status_value, status_value.replace("_", " ").title())
+
+
+def available_status_actions(
+    *,
+    current_status: JobStatus,
+    actor: User,
+    has_assignee: bool,
+    has_current_assignment: bool = False,
+) -> list[StatusAction]:
+    if actor.role == UserRole.resident:
+        return []
+    if actor.role == UserRole.contractor and not has_current_assignment:
+        return []
+
+    actions: list[StatusAction] = []
+    for target in ALLOWED_STATUS_CHANGES[current_status]:
+        if actor.role not in ROLE_GROUPS_BY_TARGET[target]:
+            continue
+        if target in ASSIGNEE_REQUIRED_STATUSES and not has_assignee:
+            continue
+        label = STATUS_ACTION_LABELS.get(target)
+        if label is None:
+            continue
+        actions.append(
+            StatusAction(
+                status=target,
+                label=label,
+                requires_message=target in MESSAGE_REQUIRED_STATUSES,
+                requires_reason=target in REASON_REQUIRED_STATUSES,
+            )
+        )
+    return sorted(actions, key=lambda action: action.label)
 
 
 def job_has_assignee(job: Job) -> bool:
@@ -279,6 +361,8 @@ def append_event(
     responsibility_stage: ResponsibilityStage | None = None,
     owner_scope: OwnerScope | None = None,
     responsibility_owner: ResponsibilityOwner | None = None,
+    assigned_org_id=UNSET,
+    assigned_contractor_user_id=UNSET,
 ) -> Event:
     touch_job(job)
     assert job.location_id is not None
@@ -286,6 +370,12 @@ def append_event(
         job_id=job.id,
         actor_user_id=actor.id,
         actor_org_id=actor.organisation_id,
+        assigned_org_id=job.assigned_org_id if assigned_org_id is UNSET else assigned_org_id,
+        assigned_contractor_user_id=(
+            job.assigned_contractor_user_id
+            if assigned_contractor_user_id is UNSET
+            else assigned_contractor_user_id
+        ),
         location_id=job.location_id,
         asset_id=job.asset_id,
         event_type=event_type,
@@ -328,14 +418,45 @@ def validate_assignee_required(job: Job, target: JobStatus) -> None:
         )
 
 
+def validate_assignment_change_requires_explicit_status(job: Job, *, explicit_status_change: bool) -> None:
+    if explicit_status_change or job.status not in ACTIVE_ASSIGNMENT_STATUSES:
+        return
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        detail=(
+            f"Assignment changes while a job is {job.status.value} require an explicit lifecycle update "
+            "so the timeline shows how attendance or field ownership changed"
+        ),
+    )
+
+
+def validate_assignment_clear_requires_explicit_status(
+    job: Job,
+    *,
+    explicit_status_change: bool,
+    will_have_assignee: bool,
+) -> None:
+    if explicit_status_change or will_have_assignee or job.status not in ASSIGNEE_REQUIRED_STATUSES:
+        return
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        detail=(
+            f"Clearing the dispatch target while a job is {job.status.value} requires an explicit lifecycle "
+            "update so the visible status still matches who is carrying the work"
+        ),
+    )
+
+
 def apply_status_change(
     job: Job,
     target: JobStatus,
     actor: User,
     *,
+    message: str | None = None,
     reason_code: str | None = None,
     responsibility_stage: ResponsibilityStage | None = None,
     owner_scope: OwnerScope | None = None,
+    responsibility_owner: ResponsibilityOwner | None = None,
 ) -> EventSpec | None:
     require_status_permission(actor, target)
 
@@ -356,6 +477,12 @@ def apply_status_change(
             detail=f"reason_code is required when moving a job to {target.value}",
         )
 
+    if target in MESSAGE_REQUIRED_STATUSES and message is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"event_message is required when moving a job to {target.value}",
+        )
+
     if target == JobStatus.completed and reason_code is None and responsibility_stage is None:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -374,11 +501,11 @@ def apply_status_change(
         )
 
     return EventSpec(
-        message=STATUS_EVENT_MESSAGES[target],
+        message=message or STATUS_EVENT_MESSAGES[target],
         event_type=EVENT_TYPE_BY_STATUS.get(target, EventType.status_change),
         target_status=target,
         reason_code=reason_code,
         responsibility_stage=stage,
         owner_scope=owner_scope or default_owner_scope(actor, job),
-        responsibility_owner=default_responsibility_owner(actor),
+        responsibility_owner=responsibility_owner or DEFAULT_RESPONSIBILITY_OWNER_BY_STATUS[target],
     )

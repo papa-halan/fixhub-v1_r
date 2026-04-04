@@ -16,9 +16,28 @@
     <a class="job-card" href="/contractor/jobs/{{ job.id }}">
       <span class="status-pill">{{ job.status_label }}</span>
       <h3>{{ job.title }}</h3>
+      <p>{{ job.coordination_headline }}</p>
       <p>{{ job.asset_name or "Asset not captured" }} - {{ job.location }}</p>
-      <p class="muted">Dispatch: {{ job.assignee_label or "Not assigned" }}</p>
+      <p class="muted">Contractor org: {{ job.assigned_org_name or "Not assigned" }}</p>
+      <p class="muted">Named worker: {{ job.assigned_contractor_name or "Not selected" }}</p>
+      <p class="muted">Next owner: {{ job.coordination_owner_label }}</p>
+      {% if job.action_required_summary %}
+      <p class="muted">Action needed now: {{ job.action_required_summary }}</p>
+      {% endif %}
+      {% if job.latest_operations_update_at %}
+      <p class="muted">Operations handoff: {{ job.latest_operations_update_message }}{% if job.latest_operations_update_actor_label %} ({{ job.latest_operations_update_actor_label }}){% endif %} at {{ job.latest_operations_update_at|timestamp }}</p>
+      {% endif %}
+      {% if job.latest_resident_update_at %}
+      <p class="muted">Resident signal: {{ job.latest_resident_update_message }}{% if job.latest_resident_update_actor_label %} ({{ job.latest_resident_update_actor_label }}){% endif %} at {{ job.latest_resident_update_at|timestamp }}</p>
+      {% endif %}
+      {% if job.coordination_detail %}
+      <p class="muted">Latest: {{ job.coordination_detail }}</p>
+      {% else %}
       <p class="muted">{{ job.description }}</p>
+      {% endif %}
+      {% if job.latest_event_at %}
+      <p class="muted">Updated {{ job.latest_event_at|timestamp }}{% if job.latest_event_actor_label %} by {{ job.latest_event_actor_label }}{% endif %}</p>
+      {% endif %}
     </a>
     {% endfor %}
   </div>

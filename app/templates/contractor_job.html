@@ -12,9 +12,33 @@
           <strong>{{ job.status_label }}</strong>
         </div>
         <div class="meta-item">
-          <span>Dispatch</span>
-          <strong>{{ job.assignee_label or "Not assigned" }}</strong>
+          <span>Current coordination</span>
+          <strong>{{ job.coordination_headline }}</strong>
         </div>
+        <div class="meta-item">
+          <span>Contractor organisation</span>
+          <strong>{{ job.assigned_org_name or "Not assigned" }}</strong>
+        </div>
+        <div class="meta-item">
+          <span>Named field worker</span>
+          <strong>{{ job.assigned_contractor_name or "Not selected" }}</strong>
+        </div>
+        <div class="meta-item">
+          <span>Next owner</span>
+          <strong>{{ job.coordination_owner_label }}</strong>
+        </div>
+        {% if job.action_required_summary %}
+        <div class="meta-item">
+          <span>Action needed now</span>
+          <strong>{{ job.action_required_summary }}</strong>
+        </div>
+        {% endif %}
+        {% if job.coordination_detail %}
+        <div class="meta-item">
+          <span>Operational detail</span>
+          <strong>{{ job.coordination_detail }}</strong>
+        </div>
+        {% endif %}
         <div class="meta-item">
           <span>Location</span>
           <strong>{{ job.location }}</strong>
@@ -33,18 +57,104 @@
           <span>Description</span>
           <strong>{{ job.description }}</strong>
         </div>
+        {% if job.latest_event_at %}
+        <div class="meta-item">
+          <span>Latest update</span>
+          <strong>{{ job.latest_event_at|timestamp }}{% if job.latest_event_actor_label %} by {{ job.latest_event_actor_label }}{% endif %}</strong>
+        </div>
+        {% endif %}
       </div>
     </section>
 
     <section class="panel">
       <div class="panel-header">
-        <h2>Progress controls</h2>
-        <p>Only change status when the execution state changes.</p>
+        <h2>Current coordination signal</h2>
+        <p>{{ coordination.headline }}</p>
       </div>
+      <div class="meta-list">
+        <div class="meta-item">
+          <span>Next owner</span>
+          <strong>{{ coordination.owner_label }}</strong>
+        </div>
+        {% if coordination.detail %}
+        <div class="meta-item">
+          <span>Operational detail</span>
+          <strong>{{ coordination.detail }}</strong>
+        </div>
+        {% endif %}
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-header">
+        <h2>Latest handoff context</h2>
+        <p>Check the latest operations and resident signals before attending site.</p>
+      </div>
+      <div class="meta-list">
+        <div class="meta-item">
+          <span>Operations handoff</span>
+          <strong>
+            {% if job.latest_operations_update_at %}
+            {{ job.latest_operations_update_message }}{% if job.latest_operations_update_actor_label %} ({{ job.latest_operations_update_actor_label }}){% endif %} at {{ job.latest_operations_update_at|timestamp }}
+            {% else %}
+            No operations handoff yet
+            {% endif %}
+          </strong>
+        </div>
+        <div class="meta-item">
+          <span>Resident signal</span>
+          <strong>
+            {% if job.latest_resident_update_at %}
+            {{ job.latest_resident_update_message }}{% if job.latest_resident_update_actor_label %} ({{ job.latest_resident_update_actor_label }}){% endif %} at {{ job.latest_resident_update_at|timestamp }}
+            {% else %}
+            No resident signal yet
+            {% endif %}
+          </strong>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-header">
+        <h2>Earlier visible jobs here</h2>
+        <p>Use prior attendance context at this location to spot recurring failures or repeat callouts.</p>
+      </div>
+      {% if related_jobs %}
+      <div class="meta-list">
+        {% for related_job in related_jobs %}
+        <div class="meta-item">
+          <span>{{ related_job.match_label }}</span>
+          <strong>{{ related_job.title }} · {{ related_job.status_label }}</strong>
+          <span class="muted">{{ related_job.coordination_headline }}</span>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p class="muted">No earlier visible jobs at this location yet.</p>
+      {% endif %}
+    </section>
+
+    {% if can_update_job %}
+    <section class="panel">
+      <div class="panel-header">
+        <h2>Progress controls</h2>
+        <p>Record what happened on site so staff and residents can work from the same update.</p>
+      </div>
+      <div class="form-grid status-update-fields">
+        <label>
+          Progress update
+          <textarea id="contractor-status-message" name="event_message" placeholder="attended room, isolated leak, replaced mixer cartridge, tested with resident present"></textarea>
+        </label>
+        <label>
+          Blocker code
+          <input id="contractor-status-reason" name="reason_code" placeholder="no_access, awaiting_parts, further_approval_needed">
+        </label>
+      </div>
+      <p class="muted form-helper">Use the blocker code when the job is blocked. The progress update should describe what changed on site.</p>
       <div class="actions">
-        <button class="button secondary" data-status="in_progress" type="button">Start work</button>
-        <button class="button secondary" data-status="blocked" type="button">Mark blocked</button>
-        <button class="button secondary" data-status="completed" type="button">Mark completed</button>
+        {% for action in status_actions %}
+        <button class="button secondary" data-status="{{ action.status }}" type="button">{{ action.label }}</button>
+        {% endfor %}
       </div>
       <p class="feedback" id="contractor-status-feedback"></p>
     </section>
@@ -59,6 +169,27 @@
           Message
           <textarea name="message" placeholder="parts ordered for Tuesday install" required></textarea>
         </label>
+        <label>
+          Reason or handoff code
+          <input name="reason_code" placeholder="awaiting_parts, no_access, further_quote_needed">
+        </label>
+        <label>
+          Coordination stage
+          <select name="responsibility_stage">
+            <option value="">No stage change</option>
+            <option value="execution">Execution</option>
+            <option value="coordination">Coordination</option>
+          </select>
+        </label>
+        <label>
+          Next owner
+          <select name="responsibility_owner">
+            <option value="">Keep current owner</option>
+            <option value="contractor">Contractor</option>
+            <option value="coordinator">Dispatch coordinator</option>
+            <option value="resident">Resident</option>
+          </select>
+        </label>
         <p class="muted form-helper">Examples: site attended, access denied at arrival, repair completed and tested.</p>
         <div class="actions">
           <button class="button" type="submit">Add update</button>
@@ -66,6 +197,14 @@
         <p class="feedback" data-feedback></p>
       </form>
     </section>
+    {% else %}
+    <section class="panel">
+      <div class="panel-header">
+        <h2>Historical visibility only</h2>
+        <p>Your organisation is no longer the active dispatch target for this job. The timeline stays visible for audit and handoff context, but execution updates are locked.</p>
+      </div>
+    </section>
+    {% endif %}
   </article>
 
   {% include "partials/event_timeline.html" %}
@@ -74,26 +213,42 @@
 <script>
   const refresh = () => window.location.reload();
 
-  FixHub.wireJsonForm(document.getElementById("contractor-event-form"), async (formData) => {
-    await FixHub.sendJson("/api/jobs/{{ job.id }}/events", "POST", {
-      message: formData.get("message"),
+  const eventForm = document.getElementById("contractor-event-form");
+  if (eventForm) {
+    FixHub.wireJsonForm(eventForm, async (formData) => {
+      await FixHub.sendJson("/api/jobs/{{ job.id }}/events", "POST", {
+        message: formData.get("message"),
+        reason_code: formData.get("reason_code") || null,
+        responsibility_stage: formData.get("responsibility_stage") || null,
+        responsibility_owner: formData.get("responsibility_owner") || null,
+      });
+      refresh();
     });
-    refresh();
-  });
+  }
 
   document.querySelectorAll("[data-status]").forEach((button) => {
     button.addEventListener("click", async () => {
       const feedback = document.getElementById("contractor-status-feedback");
+      const messageField = document.getElementById("contractor-status-message");
+      const reasonField = document.getElementById("contractor-status-reason");
+      const statusActions = {{ status_actions | tojson }};
+      const action = statusActions.find((entry) => entry.status === button.dataset.status);
       feedback.textContent = "";
       try {
         const payload = { status: button.dataset.status };
-        const statusesRequiringReason = new Set(["blocked"]);
-        if (statusesRequiringReason.has(button.dataset.status)) {
-          const reasonCode = window.prompt("Enter a reason code for this transition:");
-          if (reasonCode === null) {
-            return;
-          }
-          payload.reason_code = reasonCode.trim();
+        const reasonCode = reasonField.value.trim();
+        const eventMessage = messageField.value.trim();
+        if (action?.requires_reason && !reasonCode) {
+          throw new Error("Add a blocker code before marking this job blocked.");
+        }
+        if (action?.requires_message && !eventMessage) {
+          throw new Error("Add a progress update before changing this status.");
+        }
+        if (reasonCode) {
+          payload.reason_code = reasonCode;
+        }
+        if (eventMessage) {
+          payload.event_message = eventMessage;
         }
         if (button.dataset.status === "completed") {
           payload.responsibility_stage = "execution";

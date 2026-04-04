@@ -1,6 +1,10 @@
-# FixHub MVP
+# FixHub Pilot
 
-FixHub is a maintenance workflow demo for a resident -> operations -> contractor lifecycle.
+FixHub is currently a student-living maintenance coordination pilot, not a general maintenance suite or a full civil-works platform.
+
+The implemented core is a shared job timeline across resident -> operations -> contractor actors, with structured location context, auditable lifecycle events, and dispatch that can preserve both the contractor organisation and the named field worker.
+
+This repo is still one constrained pilot wedge. It is strongest where it records who reported work, where it sits, who it was handed to, and how lifecycle updates accumulated over time. It does not yet model the broader civil-works coordination shape such as separate requests, work orders, visits, routing decisions, or public-sector network coordination.
 
 The repository is currently stabilized through Phase 0.5:
 
@@ -86,9 +90,12 @@ erDiagram
         uuid job_id FK
         uuid actor_user_id FK
         uuid actor_org_id FK
+        uuid assigned_org_id FK
+        uuid assigned_contractor_user_id FK
         uuid location_id FK
         uuid asset_id FK
         enum event_type
+        enum target_status
         text message
         text reason_code
         enum responsibility_stage
@@ -111,17 +118,21 @@ erDiagram
     JOBS ||--o{ EVENTS : has
 ```
 
-Reportable operational locations are managed child `space` or `unit` rows. Root-level legacy placeholders are excluded from the active catalog.
+Reportable operational locations are managed child `space` or `unit` rows. Root-level legacy placeholders are excluded from the active catalog, and resident-facing location selection now shows the structured hierarchy path instead of a flattened room label.
 
 ## Current Workflow
 
 1. A resident signs in and submits a report against a managed location in their organisation.
 2. The report may reference a known asset at that location, but asset capture is optional.
 3. Front desk or operations staff add clarifying notes when needed.
-4. A dispatch coordinator assigns the work to a contractor organisation or a direct contractor.
+4. A dispatch coordinator assigns the work to a contractor organisation, and may also name a specific contractor while keeping that contractor organisation attached.
 5. A property manager triages and schedules the job.
-6. The assigned contractor or technician moves the work through execution states.
-7. Everyone reads the same shared timeline with stable location context and optional asset context.
+6. Only the currently dispatched contractor or maintenance team sees the job in the active contractor queue; earlier assignees keep read-only historical access on the detail view.
+7. Everyone reads the same shared timeline with stable location context, optional asset context, and assignment snapshots on each event.
+
+Job reads keep a stored `location_snapshot` so later location renames do not rewrite the historical record for reports and timeline events. Structured `location_id` remains the relational source of truth for filtering and lookup.
+
+Timeline events carry both lifecycle intent (`target_status`) and the active assignment target at the time of the update. The `jobs` row still keeps the current assignee and cached status for filtering, but the event stream is the more truthful record of what happened and who the work was pointed at when it happened.
 
 Supported job states:
 
@@ -197,7 +208,6 @@ When `FIXHUB_DEMO_MODE=1`, the app seeds these demo users. All demo accounts use
 | Casey Dispatch Coordinator | `coordinator` | `coordinator@fixhub.test` |
 | Devon Contractor | `contractor` | `contractor@fixhub.test` |
 | Maddie Maintenance Technician | `contractor` | `maintenance.contractor@fixhub.test` |
-| Indy Independent Contractor | `contractor` | `independent.contractor@fixhub.test` |
 
 ### Normal Mode
 

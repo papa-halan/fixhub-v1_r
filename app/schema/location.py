@@ -23,5 +23,6 @@ class LocationOption(SchemaModel):
     id: uuid.UUID
     parent_id: uuid.UUID | None = None
     name: str
+    label: str
     type: LocationType
     assets: list[AssetOption] = Field(default_factory=list)

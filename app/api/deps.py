@@ -7,8 +7,8 @@ from pathlib import Path
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import or_, select
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import select
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.core.security import verify_session_token
 from app.models import (
@@ -20,7 +20,15 @@ from app.models import (
     User,
     UserRole,
 )
-from app.services import OPERATIONS_ROLES, assignee_label, assignee_scope, list_demo_users, role_label
+from app.services import (
+    OPERATIONS_ROLES,
+    derive_assignment_projection,
+    derive_coordination_projection,
+    latest_role_update,
+    list_demo_users,
+    role_label,
+    location_label,
+)
 from app.services import status_label, user_role_label
 
 
@@ -74,6 +82,10 @@ def job_query():
             joinedload(Job.asset),
             joinedload(Job.assigned_org),
             joinedload(Job.assigned_contractor).joinedload(User.organisation),
+            selectinload(Job.events).options(
+                joinedload(Event.assigned_org),
+                joinedload(Event.assigned_contractor).joinedload(User.organisation),
+            ),
         )
         .order_by(Job.updated_at.desc(), Job.created_at.desc())
     )
@@ -91,6 +103,8 @@ def event_query(job_id: uuid.UUID):
             joinedload(Event.job).joinedload(Job.assigned_contractor).joinedload(User.organisation),
             joinedload(Event.actor_user).joinedload(User.organisation),
             joinedload(Event.actor_org),
+            joinedload(Event.assigned_org),
+            joinedload(Event.assigned_contractor).joinedload(User.organisation),
             joinedload(Event.location_record),
             joinedload(Event.asset),
         )
@@ -207,8 +221,10 @@ def serialize_user(user: User) -> dict[str, object]:
 
 
 def job_location_name(job: Job) -> str:
+    if job.location_snapshot:
+        return job.location_snapshot
     assert job.location is not None
-    return job.location.name
+    return location_label(job.location)
 
 
 def job_asset_name(job: Job) -> str | None:
@@ -218,7 +234,20 @@ def job_asset_name(job: Job) -> str | None:
 
 
 def serialize_job(job: Job) -> dict[str, object]:
-    scope = assignee_scope(job)
+    assignment = derive_assignment_projection(job, job.events)
+    projection = derive_coordination_projection(job, job.events)
+    latest_event = max(job.events, key=lambda event: (event.created_at, event.id)) if job.events else None
+    latest_resident_update = latest_role_update(job.events, roles={UserRole.resident.value})
+    latest_operations_update = latest_role_update(
+        job.events,
+        roles={
+            UserRole.admin.value,
+            UserRole.reception_admin.value,
+            UserRole.triage_officer.value,
+            UserRole.coordinator.value,
+        },
+    )
+    latest_contractor_update = latest_role_update(job.events, roles={UserRole.contractor.value})
     return {
         "id": job.id,
         "title": job.title,
@@ -229,16 +258,52 @@ def serialize_job(job: Job) -> dict[str, object]:
         "location_detail_text": job.location_detail_text,
         "asset_id": job.asset_id,
         "asset_name": job_asset_name(job),
-        "status": job.status.value,
-        "status_label": status_label(job.status),
+        "status": projection.status.value,
+        "status_label": status_label(projection.status),
+        "coordination_headline": projection.headline,
+        "coordination_owner_label": projection.owner_label,
+        "coordination_detail": projection.detail,
+        "action_required_by": projection.action_required_by,
+        "action_required_summary": projection.action_required_summary,
+        "responsibility_stage": projection.responsibility_stage,
+        "owner_scope": projection.owner_scope,
         "created_by": job.created_by,
         "created_by_name": job.creator.name,
-        "assigned_org_id": job.assigned_org_id,
-        "assigned_org_name": job.assigned_org.name if job.assigned_org else None,
-        "assigned_contractor_user_id": job.assigned_contractor_user_id,
-        "assigned_contractor_name": job.assigned_contractor.name if job.assigned_contractor else None,
-        "assignee_scope": scope.value if scope else None,
-        "assignee_label": assignee_label(job),
+        "responsibility_owner": projection.responsibility_owner,
+        "assigned_org_id": assignment.assigned_org_id,
+        "assigned_org_name": assignment.assigned_org_name,
+        "assigned_contractor_user_id": assignment.assigned_contractor_user_id,
+        "assigned_contractor_name": assignment.assigned_contractor_name,
+        "assignee_scope": assignment.assignee_scope,
+        "assignee_label": assignment.assignee_label,
+        "latest_event_type": projection.latest_event_type,
+        "latest_event_actor_label": actor_label(latest_event) if latest_event is not None else None,
+        "latest_event_at": projection.latest_event_at,
+        "latest_resident_update_message": (
+            latest_resident_update.message if latest_resident_update is not None else None
+        ),
+        "latest_resident_update_actor_label": (
+            latest_resident_update.actor_label if latest_resident_update is not None else None
+        ),
+        "latest_resident_update_at": latest_resident_update.created_at if latest_resident_update is not None else None,
+        "latest_operations_update_message": (
+            latest_operations_update.message if latest_operations_update is not None else None
+        ),
+        "latest_operations_update_actor_label": (
+            latest_operations_update.actor_label if latest_operations_update is not None else None
+        ),
+        "latest_operations_update_at": (
+            latest_operations_update.created_at if latest_operations_update is not None else None
+        ),
+        "latest_contractor_update_message": (
+            latest_contractor_update.message if latest_contractor_update is not None else None
+        ),
+        "latest_contractor_update_actor_label": (
+            latest_contractor_update.actor_label if latest_contractor_update is not None else None
+        ),
+        "latest_contractor_update_at": (
+            latest_contractor_update.created_at if latest_contractor_update is not None else None
+        ),
         "created_at": job.created_at,
         "updated_at": job.updated_at,
     }
@@ -246,7 +311,9 @@ def serialize_job(job: Job) -> dict[str, object]:
 
 def event_location_name(event: Event) -> str | None:
     if event.location_record:
-        return event.location_record.name
+        if event.job and event.job.location_snapshot:
+            return event.job.location_snapshot
+        return location_label(event.location_record)
     if event.job:
         return job_location_name(event.job)
     return None
@@ -275,6 +342,10 @@ def serialize_event(event: Event) -> dict[str, object]:
         "actor_role": role,
         "actor_role_label": actor_role_label(event),
         "organisation_name": organisation_name(event),
+        "assigned_org_id": event.assigned_org_id,
+        "assigned_org_name": event.assigned_org.name if event.assigned_org else None,
+        "assigned_contractor_user_id": event.assigned_contractor_user_id,
+        "assigned_contractor_name": event.assigned_contractor.name if event.assigned_contractor else None,
         "actor_label": actor_label(event),
         "event_type": event.event_type.value,
         "target_status": event.target_status.value if event.target_status else None,
@@ -305,6 +376,50 @@ def build_job_counts(jobs: list[dict[str, object]]) -> dict[str, int]:
     return counts
 
 
+def serialize_related_job(job: Job, *, current_job: Job) -> dict[str, object]:
+    projection = derive_coordination_projection(job, job.events)
+    return {
+        "id": job.id,
+        "title": job.title,
+        "status": projection.status.value,
+        "status_label": status_label(projection.status),
+        "coordination_headline": projection.headline,
+        "created_by_name": job.creator.name,
+        "created_at": job.created_at,
+        "updated_at": job.updated_at,
+        "match_label": (
+            "Same asset"
+            if current_job.asset_id is not None and job.asset_id == current_job.asset_id
+            else "Same location"
+        ),
+    }
+
+
+def contractor_has_current_assignment(job: Job, user: User) -> bool:
+    assignment = derive_assignment_projection(job, job.events)
+    if assignment.assigned_contractor_user_id == user.id:
+        return True
+    return bool(user.organisation_id and assignment.assigned_org_id == user.organisation_id)
+
+
+def contractor_assigned_jobs(jobs: list[Job], user: User) -> list[Job]:
+    return [job for job in jobs if contractor_has_current_assignment(job, user)]
+
+
+def contractor_can_view_job(job: Job, user: User) -> bool:
+    if contractor_has_current_assignment(job, user):
+        return True
+
+    for event in job.events:
+        if event.actor_user_id == user.id or event.assigned_contractor_user_id == user.id:
+            return True
+        if user.organisation_id is None:
+            continue
+        if event.actor_org_id == user.organisation_id or event.assigned_org_id == user.organisation_id:
+            return True
+    return False
+
+
 def can_view_job(job: Job, user: User) -> bool:
     if user.role in OPERATIONS_ROLES:
         return bool(user.organisation_id and job.organisation_id == user.organisation_id)
@@ -312,9 +427,7 @@ def can_view_job(job: Job, user: User) -> bool:
         return bool(user.organisation_id and job.created_by == user.id and job.organisation_id == user.organisation_id)
     if user.role != UserRole.contractor:
         return False
-    if job.assigned_contractor_user_id == user.id:
-        return True
-    return bool(user.organisation_id and job.assigned_org_id == user.organisation_id)
+    return contractor_can_view_job(job, user)
 
 
 def visible_job(session: Session, user: User, job_id: uuid.UUID) -> Job:
@@ -348,15 +461,29 @@ def visible_jobs(
             return []
         stmt = stmt.where(Job.created_by == user.id, Job.organisation_id == user.organisation_id)
     else:
-        contractor_filters = [Job.assigned_contractor_user_id == user.id]
-        if user.organisation_id is not None:
-            contractor_filters.append(Job.assigned_org_id == user.organisation_id)
-        stmt = stmt.where(or_(*contractor_filters))
+        jobs = list(session.scalars(stmt))
+        visible = [job for job in jobs if contractor_can_view_job(job, user)]
+        if assigned:
+            return contractor_assigned_jobs(visible, user)
+        return visible
 
+    jobs = list(session.scalars(stmt))
     if assigned:
-        stmt = stmt.where(or_(Job.assigned_org_id.is_not(None), Job.assigned_contractor_user_id.is_not(None)))
+        jobs = [job for job in jobs if derive_assignment_projection(job, job.events).assignee_label is not None]
+    return jobs
 
-    return list(session.scalars(stmt))
+
+def related_jobs_for_user(
+    session: Session,
+    user: User,
+    *,
+    job: Job,
+    limit: int = 5,
+) -> list[dict[str, object]]:
+    related_jobs = [candidate for candidate in visible_jobs(session, user) if candidate.id != job.id]
+    matching_jobs = [candidate for candidate in related_jobs if candidate.location_id == job.location_id]
+    matching_jobs.sort(key=lambda candidate: (candidate.updated_at, candidate.created_at), reverse=True)
+    return [serialize_related_job(candidate, current_job=job) for candidate in matching_jobs[:limit]]
 
 
 def render_page(
@@ -424,8 +551,12 @@ def list_contractor_organisations(session: Session) -> list[dict[str, object]]:
 def list_contractor_users(session: Session, *, include_demo: bool) -> list[dict[str, object]]:
     stmt = (
         select(User)
+        .join(User.organisation)
         .options(joinedload(User.organisation))
-        .where(User.role == UserRole.contractor)
+        .where(
+            User.role == UserRole.contractor,
+            Organisation.type == OrganisationType.contractor,
+        )
         .order_by(User.name.asc())
     )
     if not include_demo:
@@ -434,6 +565,7 @@ def list_contractor_users(session: Session, *, include_demo: bool) -> list[dict[
         {
             "id": user.id,
             "name": user.name,
+            "organisation_id": user.organisation_id,
             "organisation_name": user.organisation.name if user.organisation else None,
         }
         for user in session.scalars(stmt)

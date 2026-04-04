@@ -11,6 +11,26 @@
         <strong>{{ job.status_label }}</strong>
       </div>
       <div class="meta-item">
+        <span>Current coordination</span>
+        <strong>{{ job.coordination_headline }}</strong>
+      </div>
+      <div class="meta-item">
+        <span>Next owner</span>
+        <strong>{{ job.coordination_owner_label }}</strong>
+      </div>
+      {% if job.action_required_summary %}
+      <div class="meta-item">
+        <span>Action needed now</span>
+        <strong>{{ job.action_required_summary }}</strong>
+      </div>
+      {% endif %}
+      {% if job.coordination_detail %}
+      <div class="meta-item">
+        <span>Operational detail</span>
+        <strong>{{ job.coordination_detail }}</strong>
+      </div>
+      {% endif %}
+      <div class="meta-item">
         <span>Location</span>
         <strong>{{ job.location }}</strong>
       </div>
@@ -29,12 +49,126 @@
         <strong>{{ job.description }}</strong>
       </div>
       <div class="meta-item">
-        <span>Assigned contractor</span>
-        <strong>{{ job.assignee_label or "Not assigned yet" }}</strong>
+        <span>Contractor organisation</span>
+        <strong>{{ job.assigned_org_name or "Not assigned yet" }}</strong>
+      </div>
+      <div class="meta-item">
+        <span>Named field worker</span>
+        <strong>{{ job.assigned_contractor_name or "Not selected" }}</strong>
+      </div>
+      {% if job.latest_event_at %}
+      <div class="meta-item">
+        <span>Latest update</span>
+        <strong>{{ job.latest_event_at|timestamp }}{% if job.latest_event_actor_label %} by {{ job.latest_event_actor_label }}{% endif %}</strong>
+      </div>
+      {% endif %}
+    </div>
+  </article>
+
+  <article class="panel">
+    <div class="panel-header">
+      <h2>Current coordination signal</h2>
+      <p>{{ coordination.headline }}</p>
+    </div>
+    <div class="meta-list">
+      <div class="meta-item">
+        <span>Next owner</span>
+        <strong>{{ coordination.owner_label }}</strong>
+      </div>
+      {% if coordination.detail %}
+      <div class="meta-item">
+        <span>Latest operational detail</span>
+        <strong>{{ coordination.detail }}</strong>
+      </div>
+      {% endif %}
+      </div>
+  </article>
+
+  <article class="panel">
+    <div class="panel-header">
+      <h2>Latest team updates</h2>
+      <p>Use these before calling or chasing email for the current handoff.</p>
+    </div>
+    <div class="meta-list">
+      <div class="meta-item">
+        <span>Staff update</span>
+        <strong>
+          {% if job.latest_operations_update_at %}
+          {{ job.latest_operations_update_message }}{% if job.latest_operations_update_actor_label %} ({{ job.latest_operations_update_actor_label }}){% endif %} at {{ job.latest_operations_update_at|timestamp }}
+          {% else %}
+          No staff update yet
+          {% endif %}
+        </strong>
+      </div>
+      <div class="meta-item">
+        <span>Field update</span>
+        <strong>
+          {% if job.latest_contractor_update_at %}
+          {{ job.latest_contractor_update_message }}{% if job.latest_contractor_update_actor_label %} ({{ job.latest_contractor_update_actor_label }}){% endif %} at {{ job.latest_contractor_update_at|timestamp }}
+          {% else %}
+          No field update yet
+          {% endif %}
+        </strong>
       </div>
     </div>
   </article>
 
+  <article class="panel">
+    <div class="panel-header">
+      <h2>Earlier reports here</h2>
+      <p>Check whether this room or fixture has already needed repeated work.</p>
+    </div>
+    {% if related_jobs %}
+    <div class="meta-list">
+      {% for related_job in related_jobs %}
+      <div class="meta-item">
+        <span>{{ related_job.match_label }}</span>
+        <strong>{{ related_job.title }} · {{ related_job.status_label }}</strong>
+        <span class="muted">{{ related_job.coordination_headline }}</span>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="muted">No earlier reports from you at this location yet.</p>
+    {% endif %}
+  </article>
+
+  <article class="panel">
+    <div class="panel-header">
+      <h2>Send resident update</h2>
+      <p>Add the access detail or recurrence note staff need before they start chasing side channels.</p>
+    </div>
+    <form id="resident-update-form" class="form-grid" method="post">
+      <label>
+        Update type
+        <select name="reason_code">
+          <option value="">General resident update</option>
+          <option value="resident_access_update">Access update</option>
+          <option value="resident_access_issue">Access problem</option>
+          <option value="issue_still_present">Issue still present</option>
+        </select>
+      </label>
+      <label>
+        Message
+        <textarea name="message" placeholder="I can give access after 3pm Tuesday, or the issue is still present after yesterday's visit." required></textarea>
+      </label>
+      <p class="muted form-helper">Use this when your availability changes, access failed, or the issue returns after a completed visit.</p>
+      <div class="actions">
+        <button class="button" type="submit">Send update</button>
+      </div>
+      <p class="feedback" data-feedback></p>
+    </form>
+  </article>
+
   {% include "partials/event_timeline.html" %}
 </section>
+<script>
+  FixHub.wireJsonForm(document.getElementById("resident-update-form"), async (formData) => {
+    await FixHub.sendJson("/api/jobs/{{ job.id }}/resident-update", "POST", {
+      message: formData.get("message"),
+      reason_code: formData.get("reason_code") || null,
+    });
+    window.location.reload();
+  });
+</script>
 {% endblock %}

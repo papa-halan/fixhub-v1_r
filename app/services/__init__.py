@@ -1,9 +1,16 @@
 from app.services.auth import AuthenticationError, authenticate_user
 from app.services.bootstrap import ensure_bootstrap_user
-from app.services.catalog import build_location_asset_catalog, find_asset_by_name
+from app.services.catalog import build_location_asset_catalog, find_asset_by_name, location_label
 from app.services.demo import ensure_demo_data, is_demo_user_email, list_demo_users
 from app.services.passwords import hash_password, verify_password
-from app.services.projections import derive_job_status_from_events, sync_job_status_from_events
+from app.services.projections import (
+    derive_assignment_projection,
+    derive_coordination_projection,
+    derive_job_status_from_events,
+    latest_role_update,
+    sync_job_assignment_from_events,
+    sync_job_status_from_events,
+)
 from app.services.workflow import (
     ASSIGNEE_REQUIRED_STATUSES,
     ASSIGNMENT_ROLES,
@@ -14,8 +21,10 @@ from app.services.workflow import (
     REASON_REQUIRED_STATUSES,
     ROLE_GROUPS_BY_TARGET,
     STATUS_EVENT_MESSAGES,
+    StatusAction,
     TRIAGE_ROLES,
     ALLOWED_STATUS_CHANGES,
+    available_status_actions,
     EventSpec,
     append_event,
     apply_status_change,
@@ -31,6 +40,8 @@ from app.services.workflow import (
     status_label,
     touch_job,
     user_role_label,
+    validate_assignment_clear_requires_explicit_status,
+    validate_assignment_change_requires_explicit_status,
     validate_assignee_required,
 )
 
@@ -47,16 +58,20 @@ __all__ = [
     "REASON_REQUIRED_STATUSES",
     "ROLE_GROUPS_BY_TARGET",
     "STATUS_EVENT_MESSAGES",
+    "StatusAction",
     "TRIAGE_ROLES",
     "authenticate_user",
     "append_event",
     "apply_status_change",
     "assignee_label",
     "assignee_scope",
+    "available_status_actions",
     "build_location_asset_catalog",
     "default_owner_scope",
     "default_responsibility_owner",
     "default_stage_for_actor",
+    "derive_assignment_projection",
+    "derive_coordination_projection",
     "derive_job_status_from_events",
     "ensure_demo_data",
     "ensure_bootstrap_user",
@@ -66,12 +81,17 @@ __all__ = [
     "is_demo_user_email",
     "job_has_assignee",
     "list_demo_users",
+    "location_label",
+    "latest_role_update",
+    "sync_job_assignment_from_events",
     "require_status_permission",
     "role_label",
     "status_label",
     "sync_job_status_from_events",
     "touch_job",
     "user_role_label",
+    "validate_assignment_clear_requires_explicit_status",
+    "validate_assignment_change_requires_explicit_status",
     "validate_assignee_required",
     "verify_password",
 ]

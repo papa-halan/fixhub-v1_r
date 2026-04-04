@@ -36,6 +36,14 @@ class Event(Base):
         ForeignKey("organisations.id"),
         nullable=True,
     )
+    assigned_org_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("organisations.id"),
+        nullable=True,
+    )
+    assigned_contractor_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id"),
+        nullable=True,
+    )
     location_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("locations.id"),
         nullable=True,
@@ -103,6 +111,8 @@ class Event(Base):
         foreign_keys=[actor_user_id],
     )
     actor_org: Mapped[Organisation | None] = relationship(foreign_keys=[actor_org_id])
+    assigned_org: Mapped[Organisation | None] = relationship(foreign_keys=[assigned_org_id])
+    assigned_contractor: Mapped[User | None] = relationship(foreign_keys=[assigned_contractor_user_id])
     location_record: Mapped[Location | None] = relationship(
         back_populates="events",
         foreign_keys=[location_id],

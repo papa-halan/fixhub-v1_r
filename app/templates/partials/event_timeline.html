@@ -21,17 +21,19 @@
           {% endif %}
         </div>
         <p>{{ event.message }}</p>
-        {% if event.event_type or event.target_status or event.reason_code or event.responsibility_stage or event.owner_scope %}
+        {% if event.event_type or event.target_status or event.reason_code or event.responsibility_stage or event.owner_scope or event.responsibility_owner %}
         <p class="muted">
           {% if event.event_type %}Type: {{ event.event_type.replace("_", " ")|title }}{% endif %}
-          {% if event.event_type and (event.target_status or event.reason_code or event.responsibility_stage or event.owner_scope) %} | {% endif %}
+          {% if event.event_type and (event.target_status or event.reason_code or event.responsibility_stage or event.owner_scope or event.responsibility_owner) %} | {% endif %}
           {% if event.target_status %}Status: {{ event.target_status.replace("_", " ")|title }}{% endif %}
-          {% if event.target_status and (event.reason_code or event.responsibility_stage or event.owner_scope) %} | {% endif %}
+          {% if event.target_status and (event.reason_code or event.responsibility_stage or event.owner_scope or event.responsibility_owner) %} | {% endif %}
           {% if event.reason_code %}Reason: {{ event.reason_code }}{% endif %}
-          {% if event.reason_code and (event.responsibility_stage or event.owner_scope) %} | {% endif %}
+          {% if event.reason_code and (event.responsibility_stage or event.owner_scope or event.responsibility_owner) %} | {% endif %}
           {% if event.responsibility_stage %}Stage: {{ event.responsibility_stage.replace("_", " ")|title }}{% endif %}
-          {% if event.responsibility_stage and event.owner_scope %} | {% endif %}
+          {% if event.responsibility_stage and (event.owner_scope or event.responsibility_owner) %} | {% endif %}
           {% if event.owner_scope %}Scope: {{ event.owner_scope.replace("_", " ")|title }}{% endif %}
+          {% if event.owner_scope and event.responsibility_owner %} | {% endif %}
+          {% if event.responsibility_owner %}Owner: {{ event.responsibility_owner.replace("_", " ")|title }}{% endif %}
         </p>
         {% endif %}
       </div>

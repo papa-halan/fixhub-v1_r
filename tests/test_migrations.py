@@ -35,7 +35,7 @@ def test_alembic_has_a_single_head() -> None:
     config = alembic_config("sqlite+pysqlite:///./fixhub.db")
     script = ScriptDirectory.from_config(config)
 
-    assert list(script.get_heads()) == ["20260404_0009"]
+    assert list(script.get_heads()) == ["20260404_0011"]
 
 
 def test_demo_mode_without_database_url_uses_local_sqlite_database(monkeypatch) -> None:
@@ -436,3 +436,164 @@ def test_event_target_status_migration_backfills_deterministic_values_only(tmp_p
     assert target_status_by_id[event_ids["assignment"]] is None
     assert target_status_by_id[event_ids["note"]] is None
     assert len(ScriptDirectory.from_config(config).get_heads()) == 1
+
+
+def test_direct_dispatch_migration_backfills_org_context_for_named_contractors(tmp_path) -> None:
+    database_url = sqlite_database_url(tmp_path / "direct-dispatch-org-context.db")
+    config = alembic_config(database_url)
+    command.upgrade(config, "20260404_0009")
+
+    engine = create_engine(database_url, future=True)
+    metadata = sa.MetaData()
+    organisations = sa.Table(
+        "organisations",
+        metadata,
+        sa.Column("id", sa.Uuid()),
+        sa.Column("name", sa.Text()),
+        sa.Column("type", sa.Text()),
+        sa.Column("contractor_mode", sa.Text()),
+        sa.Column("created_at", sa.DateTime(timezone=True)),
+    )
+    users = sa.Table(
+        "users",
+        metadata,
+        sa.Column("id", sa.Uuid()),
+        sa.Column("name", sa.Text()),
+        sa.Column("email", sa.Text()),
+        sa.Column("role", sa.Text()),
+        sa.Column("organisation_id", sa.Uuid()),
+        sa.Column("is_demo_account", sa.Boolean()),
+        sa.Column("password_hash", sa.Text()),
+        sa.Column("created_at", sa.DateTime(timezone=True)),
+    )
+    locations = sa.Table(
+        "locations",
+        metadata,
+        sa.Column("id", sa.Uuid()),
+        sa.Column("organisation_id", sa.Uuid()),
+        sa.Column("parent_id", sa.Uuid()),
+        sa.Column("name", sa.Text()),
+        sa.Column("type", sa.Text()),
+        sa.Column("created_at", sa.DateTime(timezone=True)),
+    )
+    jobs = sa.Table(
+        "jobs",
+        metadata,
+        sa.Column("id", sa.Uuid()),
+        sa.Column("title", sa.Text()),
+        sa.Column("description", sa.Text()),
+        sa.Column("location_snapshot", sa.Text()),
+        sa.Column("status", sa.Text()),
+        sa.Column("created_by", sa.Uuid()),
+        sa.Column("assigned_org_id", sa.Uuid()),
+        sa.Column("assigned_contractor_user_id", sa.Uuid()),
+        sa.Column("organisation_id", sa.Uuid()),
+        sa.Column("location_id", sa.Uuid()),
+        sa.Column("location_detail_text", sa.Text()),
+        sa.Column("asset_id", sa.Uuid()),
+        sa.Column("created_at", sa.DateTime(timezone=True)),
+        sa.Column("updated_at", sa.DateTime(timezone=True)),
+    )
+
+    tenant_org_id = uuid.uuid4()
+    contractor_org_id = uuid.uuid4()
+    resident_user_id = uuid.uuid4()
+    contractor_user_id = uuid.uuid4()
+    location_id = uuid.uuid4()
+    job_id = uuid.uuid4()
+    now = datetime.now(timezone.utc)
+
+    with engine.begin() as connection:
+        connection.execute(
+            sa.insert(organisations),
+            [
+                {
+                    "id": tenant_org_id,
+                    "name": "Student Living",
+                    "type": "university",
+                    "contractor_mode": None,
+                    "created_at": now,
+                },
+                {
+                    "id": contractor_org_id,
+                    "name": "Newcastle Plumbing",
+                    "type": "contractor",
+                    "contractor_mode": "external_contractor",
+                    "created_at": now,
+                },
+            ],
+        )
+        connection.execute(
+            sa.insert(users),
+            [
+                {
+                    "id": resident_user_id,
+                    "name": "Resident Reporter",
+                    "email": "resident@example.com",
+                    "role": "resident",
+                    "organisation_id": tenant_org_id,
+                    "is_demo_account": False,
+                    "password_hash": "scrypt$placeholder",
+                    "created_at": now,
+                },
+                {
+                    "id": contractor_user_id,
+                    "name": "Named Contractor",
+                    "email": "named.contractor@example.com",
+                    "role": "contractor",
+                    "organisation_id": contractor_org_id,
+                    "is_demo_account": False,
+                    "password_hash": "scrypt$placeholder",
+                    "created_at": now,
+                },
+            ],
+        )
+        connection.execute(
+            sa.insert(locations).values(
+                id=location_id,
+                organisation_id=tenant_org_id,
+                parent_id=None,
+                name="Block A Room 14",
+                type="unit",
+                created_at=now,
+            )
+        )
+        connection.execute(
+            sa.insert(jobs).values(
+                id=job_id,
+                title="Leaking tap",
+                description="Water under sink",
+                location_snapshot="Block A Room 14",
+                status="assigned",
+                created_by=resident_user_id,
+                assigned_org_id=None,
+                assigned_contractor_user_id=contractor_user_id,
+                organisation_id=tenant_org_id,
+                location_id=location_id,
+                location_detail_text=None,
+                asset_id=None,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+
+    command.upgrade(config, "head")
+
+    migrated_jobs = sa.Table(
+        "jobs",
+        sa.MetaData(),
+        sa.Column("id", sa.Uuid()),
+        sa.Column("assigned_org_id", sa.Uuid()),
+        sa.Column("assigned_contractor_user_id", sa.Uuid()),
+    )
+
+    with engine.connect() as connection:
+        assigned_org_id, assigned_contractor_user_id = connection.execute(
+            sa.select(
+                migrated_jobs.c.assigned_org_id,
+                migrated_jobs.c.assigned_contractor_user_id,
+            ).where(migrated_jobs.c.id == job_id)
+        ).one()
+
+    assert assigned_org_id == contractor_org_id
+    assert assigned_contractor_user_id == contractor_user_id

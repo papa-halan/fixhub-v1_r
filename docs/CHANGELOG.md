@@ -6,6 +6,97 @@
 - Reviewer: `schema-test-automation`
 - Status: `active`
 
+## [0.6.12] - 2026-04-04 20:05:00 +11:00
+
+### Changed
+- contractor assigned-job queues now show only the current dispatch target instead of every historically visible job
+- reassigned contractors still retain read-only job detail access through recorded participation history, but those jobs no longer appear in the live execution queue
+- related-job summaries now derive status from the event stream so repeat-history panels do not fall back to stale `jobs.status` cache values
+
+### Notes
+- this run tightened the distinction between live field responsibility and historical visibility without changing auth, seed flows, or the shared timeline model
+
+## [0.6.11] - 2026-04-04 19:20:00 +11:00
+
+### Changed
+- contractor read visibility now follows recorded assignment and participation history instead of only the mutable current `jobs` assignee cache
+- contractor write actions now require the current active dispatch target, so reassigned contractors can still read the timeline without mutating live work
+- contractor job pages now hide execution controls when a job is visible only through historical participation
+
+### Notes
+- this run tightened actor-relationship truth without changing resident auth, demo seed data, or structured location flows
+
+## [0.6.10] - 2026-04-04 14:56:48 +11:00
+
+### Changed
+- removed the dead `app.models.mvp` alias module because it no longer reflected any real model boundary in the implemented pilot
+- rewrote README and docs index language so the repo is described as a constrained student-living pilot instead of a vague MVP bucket
+- cleaned the schema assessment to remove duplicated legacy text and to state more directly what is implemented now versus what remains deferred
+
+### Notes
+- this run favored repository honesty and reduction of legacy noise over new feature surface
+- validation was attempted after the change set and is reported with the run summary
+
+## [0.6.9] - 2026-04-04 18:35:00 +11:00
+
+### Changed
+- contractor job visibility and listing now derive current dispatch access from assignment events before falling back to mutable `jobs` row fields
+- added regression coverage for contractor reads when the `jobs` assignment cache drifts away from the recorded timeline
+
+### Notes
+- this run aligned access control with the same event-backed assignment truth already used in API projections
+
+## [0.6.8] - 2026-04-04 18:05:00 +11:00
+
+### Changed
+- resident location selection now shows structured hierarchy labels instead of bare child-location names
+- new jobs store the full hierarchical `location_snapshot`, and job/event reads now prefer that stored snapshot over the mutable current location row
+
+### Notes
+- this run tightened truthful location context without changing auth, seed, or the existing structured location-id workflow
+
+## [0.6.7] - 2026-04-04 17:10:00 +11:00
+
+### Changed
+- job projections now derive dispatch context from explicit assignment events before falling back to mutable job fields
+- resident and operations API reads now stay aligned with the recorded assignment history even if the `jobs` row drifts
+
+### Notes
+- this run tightened the truthful coordination record without changing the current auth, seed, or structured location flows
+
+## [0.6.6] - 2026-04-04 16:35:00 +11:00
+
+### Changed
+- removed the false mutual-exclusion assumption between contractor organisation assignment and named-contractor dispatch
+- direct contractor assignment now preserves the contractor organisation automatically and backfills that context for existing direct-user jobs
+- updated the operations and resident-facing copy so dispatch shows accountable contractor organisation plus optional named field worker
+- refreshed `README.md` and `docs/schema_student_living_assessment.md` to describe the truer org-plus-user dispatch model
+
+### Notes
+- this run stayed within the current Phase 0.5 job model and corrected dispatch truth instead of introducing visits or broader workflow splits
+- validation was attempted after the change set and is reported with the run summary
+
+## [0.6.5] - 2026-04-04 16:15:00 +11:00
+
+### Changed
+- added structured assignment snapshots to `events` so timeline entries keep the responsible organisation or contractor user that was active when the event occurred
+- updated README and schema assessment language to describe event-backed responsibility history instead of leaving assignment history implied by mutable job fields
+
+### Notes
+- this run focused on a foundational truthfulness improvement rather than new product surface area
+- verification focus is migrations plus app and schema coverage around assignment history
+
+## [0.6.4] - 2026-04-04 15:20:00 +11:00
+
+### Changed
+- documented that direct contractor dispatch now requires the assignee to belong to a contractor organisation
+- updated `README.md` language to describe the repo as a student-living coordination pilot rather than a generic maintenance demo
+- updated `docs/schema_student_living_assessment.md` to record the tighter dispatch-credibility guard and the remaining limitation around org-plus-user accountability
+
+### Notes
+- this run made a targeted repository-correction pass rather than a broad redesign
+- verification focus is the app and projection suite around assignment and timeline behavior
+
 ## [0.6.3] - 2026-03-22 17:40:31 +11:00
 
 ### Added
@@ -72,3 +163,4 @@
 - stopped creating new `assets` from resident free-text report intake
 - made asset selection optional and restricted asset linkage to known location assets
 - updated README workflow language to reflect optional asset capture instead of implied structured certainty
+- captured assignment target snapshots on events so historical responsibility survives reassignment

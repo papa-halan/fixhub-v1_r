@@ -6,8 +6,18 @@ import uuid
 import pytest
 from pydantic import ValidationError
 
-from app.models import EventType, Job, JobStatus, Location, LocationType, User
-from app.schema import EventCreate, EventRead, JobCreate, JobRead, LocationOption, LocationRead, LoginRequest
+from app.models import (
+    EventType,
+    Job,
+    JobStatus,
+    Location,
+    LocationType,
+    OwnerScope,
+    ResponsibilityOwner,
+    ResponsibilityStage,
+    User,
+)
+from app.schema import EventCreate, EventRead, JobCreate, JobRead, JobUpdate, LocationOption, LocationRead, LoginRequest
 from app.services.passwords import hash_password, verify_password
 
 
@@ -42,9 +52,19 @@ def test_job_create_requires_structured_location_and_trims_fields() -> None:
         )
 
 
-def test_event_create_is_note_only_and_rejects_extra_fields() -> None:
-    payload = EventCreate(message="  Called resident to confirm access  ")
+def test_event_create_accepts_structured_note_metadata_but_rejects_status_fields() -> None:
+    payload = EventCreate(
+        message="  Called resident to confirm access  ",
+        reason_code="  awaiting_access  ",
+        responsibility_stage=ResponsibilityStage.coordination,
+        owner_scope=OwnerScope.organisation,
+        responsibility_owner=ResponsibilityOwner.coordinator,
+    )
     assert payload.message == "Called resident to confirm access"
+    assert payload.reason_code == "awaiting_access"
+    assert payload.responsibility_stage == ResponsibilityStage.coordination
+    assert payload.owner_scope == OwnerScope.organisation
+    assert payload.responsibility_owner == ResponsibilityOwner.coordinator
 
     with pytest.raises(ValidationError):
         EventCreate(message=" ")
@@ -54,6 +74,20 @@ def test_event_create_is_note_only_and_rejects_extra_fields() -> None:
 
     with pytest.raises(ValidationError):
         EventCreate(message="Forged completion", target_status=JobStatus.completed)
+
+
+def test_job_update_trims_event_message() -> None:
+    payload = JobUpdate(
+        status=JobStatus.scheduled,
+        event_message="  Resident approved Friday access  ",
+        responsibility_owner=ResponsibilityOwner.contractor,
+    )
+
+    assert payload.event_message == "Resident approved Friday access"
+    assert payload.responsibility_owner == ResponsibilityOwner.contractor
+
+    with pytest.raises(ValidationError):
+        JobUpdate(status=JobStatus.scheduled, event_message=" ")
 
 
 def test_event_read_includes_optional_target_status() -> None:
@@ -70,6 +104,10 @@ def test_event_read_includes_optional_target_status() -> None:
         actor_role=None,
         actor_role_label=None,
         organisation_name=None,
+        assigned_org_id=uuid.uuid4(),
+        assigned_org_name="Newcastle Plumbing",
+        assigned_contractor_user_id=None,
+        assigned_contractor_name=None,
         actor_label="Riley Resident",
         event_type=EventType.completion,
         target_status=JobStatus.completed,
@@ -82,6 +120,7 @@ def test_event_read_includes_optional_target_status() -> None:
     )
 
     assert event.target_status == JobStatus.completed
+    assert event.assigned_org_name == "Newcastle Plumbing"
 
 
 def test_login_request_trims_credentials() -> None:
@@ -118,6 +157,9 @@ def test_phase_zero_point_five_model_columns_are_present_without_phase_one_field
     assert "location_detail_text" in Job.__table__.c
     assert Job.__table__.c["organisation_id"].nullable is False
     assert "request_id" not in Job.__table__.c
+    assert "assigned_org_id" in EventRead.model_fields
+    assert "assigned_contractor_user_id" in EventRead.model_fields
+    assert "action_required_summary" in JobRead.model_fields
 
 
 def test_location_and_job_read_models_include_phase_zero_point_five_fields() -> None:
@@ -145,14 +187,34 @@ def test_location_and_job_read_models_include_phase_zero_point_five_fields() -> 
         asset_name="Sink",
         status=JobStatus.new,
         status_label="New",
+        coordination_headline="New report waiting for intake review",
+        coordination_owner_label="Front desk",
+        coordination_detail=None,
+        action_required_by="Front desk",
+        action_required_summary="Review the report and hand it into triage or dispatch.",
+        responsibility_stage=None,
+        owner_scope=None,
         created_by=uuid.uuid4(),
         created_by_name="Riley Resident",
+        responsibility_owner=None,
         assigned_org_id=None,
         assigned_org_name=None,
         assigned_contractor_user_id=None,
         assigned_contractor_name=None,
         assignee_scope=None,
         assignee_label=None,
+        latest_event_type=None,
+        latest_event_actor_label=None,
+        latest_event_at=None,
+        latest_resident_update_message=None,
+        latest_resident_update_actor_label=None,
+        latest_resident_update_at=None,
+        latest_operations_update_message=None,
+        latest_operations_update_actor_label=None,
+        latest_operations_update_at=None,
+        latest_contractor_update_message=None,
+        latest_contractor_update_actor_label=None,
+        latest_contractor_update_at=None,
         created_at=timestamp,
         updated_at=timestamp,
     )

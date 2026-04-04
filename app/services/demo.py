@@ -9,14 +9,21 @@ from sqlalchemy.orm import Session
 from app.models import (
     Asset,
     ContractorMode,
+    EventType,
+    Job,
+    JobStatus,
     Location,
     LocationType,
+    OwnerScope,
     Organisation,
     OrganisationType,
+    ResponsibilityStage,
     User,
     UserRole,
 )
 from app.services.passwords import hash_password, verify_password
+from app.services.projections import sync_job_status_from_events
+from app.services.workflow import append_event
 
 
 @dataclass(frozen=True)
@@ -47,6 +54,30 @@ class DemoLocation:
 class DemoAsset:
     location_name: str
     name: str
+
+
+@dataclass(frozen=True)
+class DemoJobEvent:
+    actor_email: str
+    message: str
+    event_type: EventType = EventType.note
+    target_status: JobStatus | None = None
+    reason_code: str | None = None
+    responsibility_stage: ResponsibilityStage | None = None
+    owner_scope: OwnerScope | None = None
+    assigned_org_name: str | None = None
+    assigned_contractor_email: str | None = None
+
+
+@dataclass(frozen=True)
+class DemoJob:
+    title: str
+    description: str
+    creator_email: str
+    location_name: str
+    asset_name: str | None = None
+    location_detail_text: str | None = None
+    events: tuple[DemoJobEvent, ...] = ()
 
 
 DEMO_ORGANISATIONS: tuple[DemoOrganisation, ...] = (
@@ -81,6 +112,18 @@ DEMO_USERS: tuple[DemoUser, ...] = (
     DemoUser(
         name="Riley Resident",
         email="resident@fixhub.test",
+        role=UserRole.resident,
+        organisation_name="Student Living",
+    ),
+    DemoUser(
+        name="Avery Resident",
+        email="resident.blockb@fixhub.test",
+        role=UserRole.resident,
+        organisation_name="Student Living",
+    ),
+    DemoUser(
+        name="Morgan Resident",
+        email="resident.common@fixhub.test",
         role=UserRole.resident,
         organisation_name="Student Living",
     ),
@@ -295,9 +338,290 @@ DEMO_ASSETS: tuple[DemoAsset, ...] = (
 
 DEMO_USER_EMAILS = {demo.email for demo in DEMO_USERS}
 
+DEMO_JOBS: tuple[DemoJob, ...] = (
+    DemoJob(
+        title="Shower mixer leaking again",
+        description="Water is tracking under the shower mixer again after the last repair, and the resident can only provide access after classes.",
+        creator_email="resident@fixhub.test",
+        location_name="Block A Room 14",
+        asset_name="Tap",
+        location_detail_text="Ensuite shower wall closest to the vanity",
+        events=(
+            DemoJobEvent(
+                actor_email="resident@fixhub.test",
+                message="I can give access after 3pm Tuesday and the room is occupied before then.",
+                reason_code="resident_access_update",
+                responsibility_stage=ResponsibilityStage.coordination,
+                owner_scope=OwnerScope.user,
+            ),
+            DemoJobEvent(
+                actor_email="coordinator@fixhub.test",
+                message="Assigned Maddie Maintenance Technician",
+                event_type=EventType.assignment,
+                responsibility_stage=ResponsibilityStage.triage,
+                owner_scope=OwnerScope.user,
+                assigned_org_name="Campus Maintenance",
+                assigned_contractor_email="maintenance.contractor@fixhub.test",
+            ),
+            DemoJobEvent(
+                actor_email="coordinator@fixhub.test",
+                message="Dispatch target selected; job moved to assigned",
+                event_type=EventType.status_change,
+                target_status=JobStatus.assigned,
+                responsibility_stage=ResponsibilityStage.triage,
+                owner_scope=OwnerScope.user,
+                assigned_org_name="Campus Maintenance",
+                assigned_contractor_email="maintenance.contractor@fixhub.test",
+            ),
+            DemoJobEvent(
+                actor_email="triage@fixhub.test",
+                message="Reviewed prior repair history and confirmed campus maintenance should revisit the mixer.",
+                event_type=EventType.status_change,
+                target_status=JobStatus.triaged,
+                responsibility_stage=ResponsibilityStage.triage,
+                owner_scope=OwnerScope.user,
+            ),
+            DemoJobEvent(
+                actor_email="triage@fixhub.test",
+                message="Booked Maddie for Tuesday 15:00-17:00 after the resident access window.",
+                event_type=EventType.schedule,
+                target_status=JobStatus.scheduled,
+                responsibility_stage=ResponsibilityStage.coordination,
+                owner_scope=OwnerScope.user,
+            ),
+        ),
+    ),
+    DemoJob(
+        title="Laundry pump failing again",
+        description="The Block B laundry pump is stopping mid-cycle again, leaving water in the machines and creating repeat resident complaints.",
+        creator_email="resident.blockb@fixhub.test",
+        location_name="Block B Laundry",
+        asset_name="Pump",
+        location_detail_text="Rear wall machine bank closest to the floor drain",
+        events=(
+            DemoJobEvent(
+                actor_email="reception@fixhub.test",
+                message="Confirmed repeated laundry complaints from Block B residents this week.",
+                reason_code="repeat_resident_reports",
+                responsibility_stage=ResponsibilityStage.reception,
+                owner_scope=OwnerScope.organisation,
+            ),
+            DemoJobEvent(
+                actor_email="coordinator@fixhub.test",
+                message="Assigned Newcastle Plumbing",
+                event_type=EventType.assignment,
+                responsibility_stage=ResponsibilityStage.triage,
+                owner_scope=OwnerScope.organisation,
+                assigned_org_name="Newcastle Plumbing",
+            ),
+            DemoJobEvent(
+                actor_email="coordinator@fixhub.test",
+                message="Dispatch target selected; job moved to assigned",
+                event_type=EventType.status_change,
+                target_status=JobStatus.assigned,
+                responsibility_stage=ResponsibilityStage.triage,
+                owner_scope=OwnerScope.organisation,
+                assigned_org_name="Newcastle Plumbing",
+            ),
+            DemoJobEvent(
+                actor_email="triage@fixhub.test",
+                message="Reviewed the repeated pump stoppage and confirmed plumber attendance is required.",
+                event_type=EventType.status_change,
+                target_status=JobStatus.triaged,
+                responsibility_stage=ResponsibilityStage.triage,
+                owner_scope=OwnerScope.organisation,
+            ),
+            DemoJobEvent(
+                actor_email="triage@fixhub.test",
+                message="Booked plumber for Wednesday morning pending plant room key handoff from site staff.",
+                event_type=EventType.schedule,
+                target_status=JobStatus.scheduled,
+                responsibility_stage=ResponsibilityStage.coordination,
+                owner_scope=OwnerScope.organisation,
+            ),
+            DemoJobEvent(
+                actor_email="contractor@fixhub.test",
+                message="Arrived on site but the plant room was locked and no key handoff was arranged.",
+                event_type=EventType.status_change,
+                target_status=JobStatus.blocked,
+                reason_code="no_access",
+                responsibility_stage=ResponsibilityStage.execution,
+                owner_scope=OwnerScope.organisation,
+            ),
+            DemoJobEvent(
+                actor_email="coordinator@fixhub.test",
+                message="Need site staff to confirm key collection and a new attendance window before rebooking.",
+                event_type=EventType.status_change,
+                target_status=JobStatus.on_hold,
+                reason_code="awaiting_access_arrangement",
+                responsibility_stage=ResponsibilityStage.coordination,
+                owner_scope=OwnerScope.organisation,
+            ),
+        ),
+    ),
+    DemoJob(
+        title="Common room heater tripping overnight",
+        description="The Block A common room heater is dropping out overnight again after a prior visit, so residents wake up to a cold room.",
+        creator_email="resident.common@fixhub.test",
+        location_name="Block A Common Room",
+        asset_name="Heater",
+        location_detail_text="North wall heater beside the noticeboard",
+        events=(
+            DemoJobEvent(
+                actor_email="coordinator@fixhub.test",
+                message="Assigned Maddie Maintenance Technician",
+                event_type=EventType.assignment,
+                responsibility_stage=ResponsibilityStage.triage,
+                owner_scope=OwnerScope.user,
+                assigned_org_name="Campus Maintenance",
+                assigned_contractor_email="maintenance.contractor@fixhub.test",
+            ),
+            DemoJobEvent(
+                actor_email="coordinator@fixhub.test",
+                message="Dispatch target selected; job moved to assigned",
+                event_type=EventType.status_change,
+                target_status=JobStatus.assigned,
+                responsibility_stage=ResponsibilityStage.triage,
+                owner_scope=OwnerScope.user,
+                assigned_org_name="Campus Maintenance",
+                assigned_contractor_email="maintenance.contractor@fixhub.test",
+            ),
+            DemoJobEvent(
+                actor_email="triage@fixhub.test",
+                message="Confirmed this is a repeat heater trip after a prior reset and scheduled a return visit.",
+                event_type=EventType.status_change,
+                target_status=JobStatus.triaged,
+                responsibility_stage=ResponsibilityStage.triage,
+                owner_scope=OwnerScope.user,
+            ),
+            DemoJobEvent(
+                actor_email="triage@fixhub.test",
+                message="Booked Maddie for an early evening heater check while the common room is quiet.",
+                event_type=EventType.schedule,
+                target_status=JobStatus.scheduled,
+                responsibility_stage=ResponsibilityStage.coordination,
+                owner_scope=OwnerScope.user,
+            ),
+            DemoJobEvent(
+                actor_email="maintenance.contractor@fixhub.test",
+                message="Reset the heater, confirmed heat output, and left it running for the evening.",
+                event_type=EventType.status_change,
+                target_status=JobStatus.completed,
+                responsibility_stage=ResponsibilityStage.execution,
+                owner_scope=OwnerScope.user,
+            ),
+            DemoJobEvent(
+                actor_email="resident.common@fixhub.test",
+                message="The heater tripped again after last night's run and the room was cold this morning.",
+                reason_code="issue_still_present",
+                responsibility_stage=ResponsibilityStage.triage,
+                owner_scope=OwnerScope.user,
+            ),
+        ),
+    ),
+)
+
+
+def _set_job_assignment(
+    *,
+    job: Job,
+    organisations: dict[str, Organisation],
+    users: dict[str, User],
+    assigned_org_name: str | None,
+    assigned_contractor_email: str | None,
+) -> None:
+    assigned_org = organisations.get(assigned_org_name) if assigned_org_name is not None else None
+    assigned_contractor = users.get(assigned_contractor_email) if assigned_contractor_email is not None else None
+    if assigned_contractor is not None and assigned_org is None:
+        assigned_org = assigned_contractor.organisation
+    job.assigned_org = assigned_org
+    job.assigned_org_id = assigned_org.id if assigned_org is not None else None
+    job.assigned_contractor = assigned_contractor
+    job.assigned_contractor_user_id = assigned_contractor.id if assigned_contractor is not None else None
+
+
+def _ensure_demo_jobs(
+    session: Session,
+    *,
+    organisations: dict[str, Organisation],
+    users: dict[str, User],
+    locations: dict[str, Location],
+    assets: dict[tuple[str, str], Asset],
+) -> None:
+    for seeded_job in DEMO_JOBS:
+        creator = users[seeded_job.creator_email]
+        location = locations[seeded_job.location_name]
+        existing = session.scalar(
+            select(Job)
+            .where(
+                Job.created_by == creator.id,
+                Job.location_id == location.id,
+                Job.title == seeded_job.title,
+            )
+            .limit(1)
+        )
+        if existing is not None:
+            continue
+
+        asset = assets.get((seeded_job.location_name, seeded_job.asset_name)) if seeded_job.asset_name else None
+        job = Job(
+            title=seeded_job.title,
+            description=seeded_job.description,
+            organisation_id=creator.organisation_id,
+            location_snapshot=location.name,
+            location_detail_text=seeded_job.location_detail_text,
+            location_id=location.id,
+            asset_id=asset.id if asset is not None else None,
+            status=JobStatus.new,
+            created_by=creator.id,
+        )
+        session.add(job)
+        session.flush()
+
+        append_event(
+            session,
+            job=job,
+            actor=creator,
+            message="Report created",
+            event_type=EventType.report_created,
+            target_status=JobStatus.new,
+            responsibility_stage=ResponsibilityStage.reception,
+            owner_scope=OwnerScope.user,
+        )
+
+        for seeded_event in seeded_job.events:
+            assigned_org_name = seeded_event.assigned_org_name
+            if assigned_org_name is None and job.assigned_org is not None:
+                assigned_org_name = job.assigned_org.name
+            assigned_contractor_email = seeded_event.assigned_contractor_email
+            if assigned_contractor_email is None and job.assigned_contractor is not None:
+                assigned_contractor_email = job.assigned_contractor.email
+            _set_job_assignment(
+                job=job,
+                organisations=organisations,
+                users=users,
+                assigned_org_name=assigned_org_name,
+                assigned_contractor_email=assigned_contractor_email,
+            )
+            append_event(
+                session,
+                job=job,
+                actor=users[seeded_event.actor_email],
+                message=seeded_event.message,
+                event_type=seeded_event.event_type,
+                target_status=seeded_event.target_status,
+                reason_code=seeded_event.reason_code,
+                responsibility_stage=seeded_event.responsibility_stage,
+                owner_scope=seeded_event.owner_scope,
+            )
+
+        sync_job_status_from_events(job)
+        session.flush()
+
 
 def ensure_demo_data(session: Session, *, demo_password: str) -> None:
     org_cache: dict[str, Organisation] = {}
+    user_cache: dict[str, User] = {}
 
     for demo_org in DEMO_ORGANISATIONS:
         organisation = org_cache.get(demo_org.name)
@@ -337,6 +661,7 @@ def ensure_demo_data(session: Session, *, demo_password: str) -> None:
         if user.password_hash is None or not verify_password(demo_password, user.password_hash):
             user.password_hash = hash_password(demo_password)
         user.is_demo_account = True
+        user_cache[demo.email] = user
 
     session.flush()
 
@@ -369,6 +694,7 @@ def ensure_demo_data(session: Session, *, demo_password: str) -> None:
 
     session.flush()
 
+    asset_cache: dict[tuple[str, str], Asset] = {}
     for demo_asset in DEMO_ASSETS:
         location = location_cache[demo_asset.location_name]
         asset = session.scalar(
@@ -377,9 +703,19 @@ def ensure_demo_data(session: Session, *, demo_password: str) -> None:
             .limit(1)
         )
         if asset is None:
-            session.add(Asset(location_id=location.id, name=demo_asset.name))
+            asset = Asset(location_id=location.id, name=demo_asset.name)
+            session.add(asset)
+            session.flush()
+        asset_cache[(demo_asset.location_name, demo_asset.name)] = asset
 
     session.flush()
+    _ensure_demo_jobs(
+        session,
+        organisations=org_cache,
+        users=user_cache,
+        locations=location_cache,
+        assets=asset_cache,
+    )
 
 
 def list_demo_users(session: Session) -> Sequence[User]:
