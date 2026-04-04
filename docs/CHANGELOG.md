@@ -6,6 +6,15 @@
 - Reviewer: `schema-test-automation`
 - Status: `active`
 
+## [0.6.18] - 2026-04-04 23:35:00 +11:00
+
+### Changed
+- pending-signal, visit-plan, and role-update projections now prefer actor name, role, and organisation snapshots stored on events instead of rebuilding those labels from mutable live user rows
+- added regression coverage so later account or organisation renames do not silently rewrite the coordination signal people are reading from
+
+### Notes
+- this run closed a remaining history-truth gap inside the existing event-backed model rather than widening the domain surface
+
 ## [0.6.16] - 2026-04-04 22:42:00 +11:00
 
 ### Changed
@@ -25,6 +34,16 @@
 
 ### Notes
 - this run tightened pilot truth around resident-to-operations coordination without widening the current job/event model
+
+## [0.6.17] - 2026-04-04 23:20:00 +11:00
+
+### Changed
+- jobs now store both the actor who logged the record in `created_by` and the resident the record belongs to in `reported_for_user_id`
+- resident visibility and operations UI panels now read from the explicit reported-for resident instead of the overloaded creator field
+- added an Alembic backfill so older jobs recover the report-logging actor from `report_created` events while preserving the resident subject on the new column
+
+### Notes
+- this run corrected a foundational actor-relationship lie in the Phase 0.5 model without widening the product into requests, work orders, or visits
 
 ## [0.6.16] - 2026-04-04 22:30:00 +11:00
 
@@ -214,3 +233,7 @@
 - made asset selection optional and restricted asset linkage to known location assets
 - updated README workflow language to reflect optional asset capture instead of implied structured certainty
 - captured assignment target snapshots on events so historical responsibility survives reassignment
+# 2026-04-04
+
+- anchored resident users to a home location so resident-scoped reporting can enforce truthful actor/location relationships instead of exposing the whole organisation catalog
+- restricted resident report creation and staff-on-behalf intake to locations inside the resident's reportable area while preserving operations-wide intake and structured location flows

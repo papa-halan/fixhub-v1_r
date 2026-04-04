@@ -149,6 +149,16 @@ class CoordinationProjection:
 
 
 @dataclass(frozen=True)
+class ActivityGapProjection:
+    headline: str
+    summary: str
+    latest_event_id: Any
+    latest_event_at: datetime
+    latest_lifecycle_event_id: Any | None
+    latest_lifecycle_event_at: datetime | None
+
+
+@dataclass(frozen=True)
 class RoleUpdateProjection:
     actor_label: str
     actor_role: str
@@ -161,6 +171,35 @@ def _enum_value(value: Any) -> str | None:
     if value is None:
         return None
     return getattr(value, "value", value)
+
+
+def _event_actor_role_value(event: Any) -> str | None:
+    snapshot_role = getattr(event, "actor_role_snapshot", None)
+    if snapshot_role:
+        return snapshot_role
+    return _enum_value(getattr(getattr(event, "actor_user", None), "role", None))
+
+
+def _event_actor_name(event: Any) -> str:
+    snapshot_name = getattr(event, "actor_name_snapshot", None)
+    if snapshot_name:
+        return snapshot_name
+    return getattr(getattr(event, "actor_user", None), "name", None) or "System"
+
+
+def _event_actor_org_name(event: Any) -> str | None:
+    snapshot_org_name = getattr(event, "actor_org_name_snapshot", None)
+    if snapshot_org_name:
+        return snapshot_org_name
+    return getattr(getattr(getattr(event, "actor_user", None), "organisation", None), "name", None)
+
+
+def _event_actor_label(event: Any) -> str:
+    actor_name = _event_actor_name(event)
+    organisation_name = _event_actor_org_name(event)
+    if organisation_name:
+        return f"{actor_name} ({organisation_name})"
+    return actor_name
 
 
 def _is_generic_status_echo(event: Any) -> bool:
@@ -254,8 +293,7 @@ def coordination_summary(job: Any, events: Iterable[Any]) -> CoordinationSummary
     latest_message = getattr(status_event, "message", None) or getattr(latest_event, "message", None)
     latest_reason = getattr(status_event, "reason_code", None)
     latest_event_reason = getattr(latest_event, "reason_code", None)
-    latest_actor_role = getattr(getattr(latest_event, "actor_user", None), "role", None)
-    latest_actor_role_value = getattr(latest_actor_role, "value", latest_actor_role)
+    latest_actor_role_value = _event_actor_role_value(latest_event) if latest_event is not None else None
 
     if latest_actor_role_value == "resident" and latest_event_reason in RESIDENT_ACCESS_REASON_CODES:
         return CoordinationSummary(
@@ -476,22 +514,13 @@ def derive_assignment_projection(job: Any, events: Iterable[Any]) -> AssignmentP
 def latest_role_update(events: Iterable[Any], *, roles: set[str]) -> RoleUpdateProjection | None:
     ordered_events = sorted(events, key=_event_order_key)
     for event in reversed(ordered_events):
-        actor_user = getattr(event, "actor_user", None)
-        actor_role = getattr(actor_user, "role", None)
-        actor_role_value = getattr(actor_role, "value", actor_role)
+        actor_role_value = _event_actor_role_value(event)
         if actor_role_value not in roles:
             continue
         if not _is_actionable_role_update(event):
             continue
-        actor_name = getattr(actor_user, "name", None) or "System"
-        organisation = getattr(actor_user, "organisation", None)
-        organisation_name = getattr(organisation, "name", None)
-        if organisation_name:
-            actor_label = f"{actor_name} ({organisation_name})"
-        else:
-            actor_label = actor_name
         return RoleUpdateProjection(
-            actor_label=actor_label,
+            actor_label=_event_actor_label(event),
             actor_role=actor_role_value,
             message=getattr(event, "message", None) or "",
             reason_code=getattr(event, "reason_code", None),
@@ -513,6 +542,9 @@ class PendingSignalProjection:
 class VisitPlanProjection:
     headline: str
     summary: str
+    dispatch_message: str | None
+    dispatch_actor_label: str | None
+    dispatch_at: datetime | None
     booking_message: str | None
     booking_actor_label: str | None
     booking_at: datetime | None
@@ -655,14 +687,9 @@ def _event_timestamp(event: Any) -> datetime | None:
 
 
 def _actor_label(event: Any) -> str | None:
-    actor_user = getattr(event, "actor_user", None)
-    if actor_user is None:
+    if event is None:
         return None
-    actor_name = getattr(actor_user, "name", None) or "System"
-    organisation_name = getattr(getattr(actor_user, "organisation", None), "name", None)
-    if organisation_name:
-        return f"{actor_name} ({organisation_name})"
-    return actor_name
+    return _event_actor_label(event)
 
 
 def _latest_schedule_event(events: Iterable[Any]) -> Any | None:
@@ -678,12 +705,24 @@ def _latest_schedule_event(events: Iterable[Any]) -> Any | None:
     return matching[-1]
 
 
+def _latest_assignment_signal(events: Iterable[Any]) -> Any | None:
+    ordered_events = sorted(events, key=_event_order_key)
+    matching = [
+        event
+        for event in ordered_events
+        if _enum_value(getattr(event, "event_type", None)) == "assignment"
+    ]
+    if not matching:
+        return None
+    return matching[-1]
+
+
 def _latest_access_event(events: Iterable[Any]) -> Any | None:
     ordered_events = sorted(events, key=_event_order_key)
     matching = [
         event
         for event in ordered_events
-        if _enum_value(getattr(getattr(event, "actor_user", None), "role", None)) == "resident"
+        if _event_actor_role_value(event) == "resident"
         and getattr(event, "reason_code", None) in RESIDENT_ACCESS_REASON_CODES
     ]
     if not matching:
@@ -713,6 +752,8 @@ def derive_visit_plan(job: Any, events: Iterable[Any]) -> VisitPlanProjection | 
         return None
 
     status = derive_job_status_from_events(ordered_events)
+    assignment = derive_assignment_projection(job, ordered_events)
+    assignment_event = _latest_assignment_signal(ordered_events)
     schedule_event = _latest_schedule_event(ordered_events)
     access_event = _latest_access_event(ordered_events)
     blocker_event = _latest_access_blocker_event(ordered_events)
@@ -732,6 +773,18 @@ def derive_visit_plan(job: Any, events: Iterable[Any]) -> VisitPlanProjection | 
     ):
         headline = "Access arrangement is not ready for the next visit"
         summary = "Resolve keys, resident timing, or site access first, then record the replacement attendance plan."
+    elif schedule_event is not None and assignment.assignee_label is None:
+        headline = "Visit is booked but no dispatch target is recorded"
+        summary = "Record who is actually carrying the visit so resident, staff, and field updates stay credible."
+    elif (
+        schedule_event is not None
+        and assignment.assigned_org_id is not None
+        and assignment.assigned_contractor_user_id is None
+    ):
+        headline = "Visit is booked but no named attendee is recorded"
+        summary = (
+            "The timeline shows a contractor organisation, but not the person expected on site for this visit."
+        )
     elif schedule_event is not None:
         headline = "Current visit plan is recorded"
         summary = "Use the booked window and latest access note as the working attendance plan."
@@ -741,10 +794,16 @@ def derive_visit_plan(job: Any, events: Iterable[Any]) -> VisitPlanProjection | 
     elif status in {JobStatus.assigned, JobStatus.triaged, JobStatus.reopened}:
         headline = "Attendance still needs a booked visit"
         summary = "Set the first credible attendance window so resident, staff, and contractor are working from the same plan."
+        if assignment.assignee_label is not None:
+            headline = "Dispatch recorded but attendance still needs a booked visit"
+            summary = "The work has a dispatch target, but the resident-visible visit window has not been recorded yet."
 
     return VisitPlanProjection(
         headline=headline,
         summary=summary,
+        dispatch_message=getattr(assignment_event, "message", None),
+        dispatch_actor_label=_actor_label(assignment_event) if assignment_event is not None else None,
+        dispatch_at=_event_timestamp(assignment_event),
         booking_message=getattr(schedule_event, "message", None),
         booking_actor_label=_actor_label(schedule_event) if schedule_event is not None else None,
         booking_at=schedule_at,
@@ -770,7 +829,7 @@ def derive_coordination_projection(job: Any, events: Iterable[Any]) -> Coordinat
     responsibility_owner = _enum_value(getattr(anchor_event, "responsibility_owner", None))
 
     owner_label = summary.owner_label
-    if status in {JobStatus.scheduled, JobStatus.in_progress, JobStatus.follow_up_scheduled} and assignment.assignee_label:
+    if status == JobStatus.in_progress and assignment.assignee_label:
         owner_label = assignment.assignee_label
 
     return CoordinationProjection(
@@ -789,4 +848,42 @@ def derive_coordination_projection(job: Any, events: Iterable[Any]) -> Coordinat
         latest_lifecycle_event_id=getattr(lifecycle_event, "id", None),
         latest_lifecycle_event_type=_enum_value(getattr(lifecycle_event, "event_type", None)),
         latest_lifecycle_event_at=getattr(lifecycle_event, "created_at", None),
+    )
+
+
+def derive_activity_gap(job: Any, events: Iterable[Any]) -> ActivityGapProjection | None:
+    ordered_events = sorted(events, key=_event_order_key)
+    if not ordered_events:
+        return None
+
+    projection = derive_coordination_projection(job, ordered_events)
+    latest_event = ordered_events[-1]
+    latest_event_id = getattr(latest_event, "id", None)
+    latest_event_at = getattr(latest_event, "created_at", None)
+    latest_lifecycle_event_id = projection.latest_lifecycle_event_id
+    latest_lifecycle_event_at = projection.latest_lifecycle_event_at
+
+    if latest_event_id is None or latest_event_at is None:
+        return None
+    if latest_event_id == latest_lifecycle_event_id:
+        return None
+
+    actor_role = _event_actor_role_value(latest_event)
+    actor_label = _event_actor_label(latest_event)
+    message = getattr(latest_event, "message", None) or "A newer coordination update was recorded."
+
+    if actor_role == "resident":
+        headline = "Resident posted a newer update without changing workflow state"
+    elif actor_role == "contractor":
+        headline = "Field progress is newer than the last workflow state change"
+    else:
+        headline = "Operations recorded newer coordination without changing workflow state"
+
+    return ActivityGapProjection(
+        headline=headline,
+        summary=f"{actor_label} recorded a newer update after the last lifecycle change: {message}",
+        latest_event_id=latest_event_id,
+        latest_event_at=latest_event_at,
+        latest_lifecycle_event_id=latest_lifecycle_event_id,
+        latest_lifecycle_event_at=latest_lifecycle_event_at,
     )

@@ -30,6 +30,4 @@ include = ["app*"]
 [tool.setuptools.package-data]
 app = ["templates/*.html", "templates/partials/*.html", "static/*.css", "static/*.js"]
 
-# ~/.codex/config.toml or project config
-[windows]
-sandbox = "elevated"
+

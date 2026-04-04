@@ -42,6 +42,7 @@ class DemoUser:
     email: str
     role: UserRole
     organisation_name: str | None = None
+    home_location_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -103,11 +104,6 @@ DEMO_ORGANISATIONS: tuple[DemoOrganisation, ...] = (
         type=OrganisationType.contractor,
         contractor_mode=ContractorMode.maintenance_team,
     ),
-    DemoOrganisation(
-        name="Independent Contractors",
-        type=OrganisationType.contractor,
-        contractor_mode=ContractorMode.external_contractor,
-    ),
 )
 
 
@@ -117,18 +113,21 @@ DEMO_USERS: tuple[DemoUser, ...] = (
         email="resident@fixhub.test",
         role=UserRole.resident,
         organisation_name="Student Living",
+        home_location_name="Block A Room 14",
     ),
     DemoUser(
         name="Avery Resident",
         email="resident.blockb@fixhub.test",
         role=UserRole.resident,
         organisation_name="Student Living",
+        home_location_name="Block B Room 8",
     ),
     DemoUser(
         name="Morgan Resident",
         email="resident.common@fixhub.test",
         role=UserRole.resident,
         organisation_name="Student Living",
+        home_location_name="Block A Common Room",
     ),
     DemoUser(
         name="Sky System Admin",
@@ -166,12 +165,6 @@ DEMO_USERS: tuple[DemoUser, ...] = (
         role=UserRole.contractor,
         organisation_name="Campus Maintenance",
     ),
-    DemoUser(
-        name="Indy Independent Contractor",
-        email="independent.contractor@fixhub.test",
-        role=UserRole.contractor,
-        organisation_name="Independent Contractors",
-    ),
 )
 
 
@@ -189,60 +182,6 @@ DEMO_LOCATIONS: tuple[DemoLocation, ...] = (
     ),
     DemoLocation(
         name="Block B",
-        organisation_name="Student Living",
-        type=LocationType.building,
-        parent_name="Callaghan Campus",
-    ),
-    DemoLocation(
-        name="Block C",
-        organisation_name="Student Living",
-        type=LocationType.building,
-        parent_name="Callaghan Campus",
-    ),
-    DemoLocation(
-        name="Block D",
-        organisation_name="Student Living",
-        type=LocationType.building,
-        parent_name="Callaghan Campus",
-    ),
-    DemoLocation(
-        name="Block E",
-        organisation_name="Student Living",
-        type=LocationType.building,
-        parent_name="Callaghan Campus",
-    ),
-    DemoLocation(
-        name="Block F",
-        organisation_name="Student Living",
-        type=LocationType.building,
-        parent_name="Callaghan Campus",
-    ),
-    DemoLocation(
-        name="Block G",
-        organisation_name="Student Living",
-        type=LocationType.building,
-        parent_name="Callaghan Campus",
-    ),
-    DemoLocation(
-        name="Block H",
-        organisation_name="Student Living",
-        type=LocationType.building,
-        parent_name="Callaghan Campus",
-    ),
-    DemoLocation(
-        name="Block J",
-        organisation_name="Student Living",
-        type=LocationType.building,
-        parent_name="Callaghan Campus",
-    ),
-    DemoLocation(
-        name="Block K",
-        organisation_name="Student Living",
-        type=LocationType.building,
-        parent_name="Callaghan Campus",
-    ),
-    DemoLocation(
-        name="Block L",
         organisation_name="Student Living",
         type=LocationType.building,
         parent_name="Callaghan Campus",
@@ -270,60 +209,6 @@ DEMO_LOCATIONS: tuple[DemoLocation, ...] = (
         organisation_name="Student Living",
         type=LocationType.space,
         parent_name="Block B",
-    ),
-    DemoLocation(
-        name="Block C Room 5",
-        organisation_name="Student Living",
-        type=LocationType.unit,
-        parent_name="Block C",
-    ),
-    DemoLocation(
-        name="Block D Room 12",
-        organisation_name="Student Living",
-        type=LocationType.unit,
-        parent_name="Block D",
-    ),
-    DemoLocation(
-        name="Block E Kitchen",
-        organisation_name="Student Living",
-        type=LocationType.space,
-        parent_name="Block E",
-    ),
-    DemoLocation(
-        name="Block F Room 3",
-        organisation_name="Student Living",
-        type=LocationType.unit,
-        parent_name="Block F",
-    ),
-    DemoLocation(
-        name="Block G Room 9",
-        organisation_name="Student Living",
-        type=LocationType.unit,
-        parent_name="Block G",
-    ),
-    DemoLocation(
-        name="Block H Room 2",
-        organisation_name="Student Living",
-        type=LocationType.unit,
-        parent_name="Block H",
-    ),
-    DemoLocation(
-        name="Block J Lounge",
-        organisation_name="Student Living",
-        type=LocationType.space,
-        parent_name="Block J",
-    ),
-    DemoLocation(
-        name="Block K Laundry",
-        organisation_name="Student Living",
-        type=LocationType.space,
-        parent_name="Block K",
-    ),
-    DemoLocation(
-        name="Block L Room 7",
-        organisation_name="Student Living",
-        type=LocationType.unit,
-        parent_name="Block L",
     ),
 )
 
@@ -939,6 +824,12 @@ def ensure_demo_data(session: Session, *, demo_password: str) -> None:
         location.parent_id = location_cache[demo_location.parent_name].id if demo_location.parent_name else None
 
     session.flush()
+
+    for demo in DEMO_USERS:
+        user = user_cache[demo.email]
+        user.home_location_id = (
+            location_cache[demo.home_location_name].id if demo.home_location_name is not None else None
+        )
 
     asset_cache: dict[tuple[str, str], Asset] = {}
     for demo_asset in DEMO_ASSETS:

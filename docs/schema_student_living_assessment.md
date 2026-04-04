@@ -1,6 +1,6 @@
 # Schema Assessment: Residence Operations Pilot
 
-Date: `2026-04-04 22:42:00 +11:00`
+Date: `2026-04-04 23:35:00 +11:00`
 
 ## Document Metadata
 
@@ -24,6 +24,7 @@ Date: `2026-04-04 22:42:00 +11:00`
 - locations support `parent_id` and `type`, and resident report creation uses structured `location_id`
 - resident location selection and job reads now preserve the full location hierarchy path instead of reducing location context to the mutable leaf name
 - jobs store `organisation_id` directly and keep `location_detail_text` as descriptive context only
+- jobs now separate the staff actor who logged a record (`created_by`) from the resident the work belongs to (`reported_for_user_id`)
 - root-level legacy placeholder locations are removed or demoted out of the active catalog during migration cleanup
 
 ## Workflow Suitability Summary
@@ -41,8 +42,10 @@ Date: `2026-04-04 22:42:00 +11:00`
 - resident-visible timelines with structured accountability metadata
 - resident-visible timelines that preserve assignment responsibility on each recorded update
 - resident-visible reads that preserve the original location snapshot even if the managed location label changes later
+- coordination summaries, pending signals, and visit-plan actor labels that prefer event snapshots over mutable live user and organisation rows
 - organisation-scoped resident reporting with managed location selection
 - operations-scoped on-behalf intake that keeps the resident attached as the visible case owner while recording which staff path created the job
+- resident visibility now follows the explicit reported-for user instead of relying on an overloaded creator field
 - explicit demo-mode auth containment for seeded demo accounts and shortcut switching
 
 ### Role Semantics In The Current UI
@@ -89,6 +92,7 @@ Date: `2026-04-04 22:42:00 +11:00`
 
 - the current repo is credible as a residence-operations coordination pilot because it keeps a shared timeline, structured location context, and org-backed dispatch accountability
 - the intake record is now more credible for that pilot because the repo can represent resident self-service, staff-mediated intake, after-hours handoff, and inspection-origin entry without pretending every job started in the same portal flow
+- the job row is now more truthful because it no longer has to pretend the resident and the staff intake actor are the same person
 - the current repo is not yet credible as a broader civil-works coordination platform because it still collapses intake, dispatch, attendance, and completion into one `Job`
 - resident access updates now land on the coordination owner instead of being mis-stamped as triage work, which better matches the booked-attendance workflow already implemented
 - dead compatibility surface that implied a separate legacy model layer has been removed instead of being kept as misleading future-facing noise

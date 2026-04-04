@@ -186,6 +186,7 @@ def test_password_hash_round_trip() -> None:
 def test_phase_zero_point_five_model_columns_are_present_without_phase_one_fields() -> None:
     assert "password_hash" in User.__table__.c
     assert "is_demo_account" in User.__table__.c
+    assert "home_location_id" in User.__table__.c
     assert User.__table__.c["is_demo_account"].nullable is False
 
     assert "parent_id" in Location.__table__.c

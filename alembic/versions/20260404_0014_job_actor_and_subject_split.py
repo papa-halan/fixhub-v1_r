@@ -69,6 +69,9 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    bind = op.get_bind()
+    bind.execute(sa.update(jobs_table).values(created_by=jobs_table.c.reported_for_user_id))
+
     with op.batch_alter_table("jobs", recreate="auto") as batch_op:
         batch_op.drop_index("ix_jobs_reported_for_created_at")
         batch_op.drop_constraint("fk_jobs_reported_for_user_id_users", type_="foreignkey")

@@ -350,6 +350,25 @@ def default_owner_scope(actor: User, job: Job) -> OwnerScope:
     return OwnerScope.organisation
 
 
+def default_owner_scope_for_status(*, actor: User, job: Job, target: JobStatus) -> OwnerScope:
+    if target in {
+        JobStatus.assigned,
+        JobStatus.scheduled,
+        JobStatus.in_progress,
+        JobStatus.blocked,
+        JobStatus.follow_up_scheduled,
+    }:
+        scope = assignee_scope(job)
+        if scope is not None:
+            return scope
+    elif target == JobStatus.completed:
+        return OwnerScope.user
+
+    if actor.role == UserRole.resident or actor.organisation_id is None:
+        return OwnerScope.user
+    return OwnerScope.organisation
+
+
 def append_event(
     session: Session,
     *,
@@ -530,6 +549,6 @@ def apply_status_change(
         target_status=target,
         reason_code=reason_code,
         responsibility_stage=stage,
-        owner_scope=owner_scope or default_owner_scope(actor, job),
+        owner_scope=owner_scope or default_owner_scope_for_status(actor=actor, job=job, target=target),
         responsibility_owner=responsibility_owner or DEFAULT_RESPONSIBILITY_OWNER_BY_STATUS[target],
     )

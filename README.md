@@ -5,6 +5,7 @@ FixHub is being built toward a civil-works coordination platform. The implemente
 The implemented core is a shared job timeline across resident -> operations -> contractor actors, with structured location context, auditable lifecycle events, dispatch that can preserve both the contractor organisation and the named field worker, and intake records that now distinguish resident-portal reports from staff-mediated entry paths.
 
 This repo is one truthful pilot wedge toward that larger goal. It is strongest where it records who reported work, where it sits, who it was handed to, how access and scheduling changed, and how lifecycle updates accumulated over time. It does not yet model the broader civil-works coordination shape such as separate requests, work orders, visits, routing decisions, or public-sector network coordination.
+The seeded demo footprint is intentionally narrower than a campus-wide estate: it stays focused on a small Callaghan residence wedge with a limited contractor set, rather than implying a generic contractor marketplace or broad asset-management rollout.
 
 The repository is currently stabilized through Phase 0.5:
 
@@ -49,6 +50,7 @@ erDiagram
         enum role
         bool is_demo_account
         uuid organisation_id FK
+        uuid home_location_id FK
         timestamptz created_at
     }
 
@@ -77,6 +79,7 @@ erDiagram
         text location_detail_text
         enum status
         uuid created_by FK
+        uuid reported_for_user_id FK
         uuid organisation_id FK
         uuid location_id FK
         uuid asset_id FK
@@ -110,16 +113,18 @@ erDiagram
     ORGANISATIONS ||--o{ LOCATIONS : owns
     LOCATIONS ||--o{ LOCATIONS : contains
     LOCATIONS ||--o{ ASSETS : contains
+    LOCATIONS ||--o{ USERS : anchors
     ORGANISATIONS ||--o{ JOBS : owns
     LOCATIONS ||--o{ JOBS : reported_at
     ASSETS ||--o{ JOBS : reported_on
     ORGANISATIONS ||--o{ JOBS : assigned_org
+    USERS ||--o{ JOBS : reported_for
     USERS ||--o{ JOBS : direct_assignee
     USERS ||--o{ JOBS : creates
     JOBS ||--o{ EVENTS : has
 ```
 
-Reportable operational locations are managed child `space` or `unit` rows. Root-level legacy placeholders are excluded from the active catalog, and resident-facing location selection now shows the structured hierarchy path instead of a flattened room label.
+Reportable operational locations are managed child `space` or `unit` rows. Root-level legacy placeholders are excluded from the active catalog, and resident-facing location selection now shows the structured hierarchy path instead of a flattened room label. Residents are now anchored to a home location so the resident portal only offers physically related places instead of the entire organisation-wide catalog.
 
 ## Current Workflow
 
@@ -134,8 +139,10 @@ Reportable operational locations are managed child `space` or `unit` rows. Root-
 
 Job reads keep a stored `location_snapshot` so later location renames do not rewrite the historical record for reports and timeline events. Asset-linked jobs now also keep an `asset_snapshot` so later catalog renames do not silently rewrite earlier operational records. Structured `location_id` and `asset_id` remain the relational source of truth for filtering and lookup.
 
+`jobs.created_by` now records who actually logged the coordination record, while `jobs.reported_for_user_id` keeps the resident the work belongs to. That keeps staff-mediated intake truthful without breaking resident-scoped visibility.
+
 Timeline events carry both lifecycle intent (`target_status`) and the active assignment target at the time of the update. The `jobs` row still keeps the current assignee and cached status for filtering, but the event stream is the more truthful record of what happened and who the work was pointed at when it happened.
-Current job reads now also derive assignee labels from the latest assignment event snapshot, so later renames of contractor organisations or field workers do not silently rewrite the dispatch record people coordinated from.
+Current job reads now also derive assignee labels from the latest assignment event snapshot, so later renames of contractor organisations or field workers do not silently rewrite the dispatch record people coordinated from. Pending-signal and visit-plan summaries use the same event snapshots for actor names, roles, and organisations, so later account edits do not silently rewrite who posted the coordination update people are reacting to.
 
 Resident updates are intentionally narrow. The pilot accepts only structured resident coordination reasons that operations can act on consistently: `resident_access_update`, `resident_access_issue`, `issue_still_present`, `resident_reported_recurrence`, and `resident_confirmed_resolved`. Access reasons are valid only while coordination is still active; post-visit reasons are valid only after completion or during a recorded follow-up cycle.
 

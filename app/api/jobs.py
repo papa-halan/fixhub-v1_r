@@ -40,10 +40,12 @@ from app.services import (
     ASSIGNMENT_ROLES,
     OPERATIONS_ROLES,
     EventSpec,
+    STATUS_EVENT_MESSAGES,
     append_event,
     apply_status_change,
     assignee_label,
     assignee_scope,
+    can_user_report_location,
     find_asset_by_name,
     job_has_assignee,
     sync_job_assignment_from_events,
@@ -181,6 +183,11 @@ def create_job(
         or not is_reportable_location(location)
     ):
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Choose a valid location")
+    if reporter.role == UserRole.resident and not can_user_report_location(session, user=reporter, location=location):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Choose a location within the resident's reportable area",
+        )
     asset = None
     if payload.asset_name is not None:
         asset_name = clean_text(payload.asset_name, "asset_name")
@@ -406,6 +413,41 @@ def apply_assignment_change(
     return events
 
 
+def merge_assignment_status_event(
+    *,
+    assignment_events: list[EventSpec],
+    status_event: EventSpec | None,
+) -> tuple[list[EventSpec], bool]:
+    if status_event is None or status_event.target_status != JobStatus.assigned:
+        return assignment_events, False
+
+    for index in range(len(assignment_events) - 1, -1, -1):
+        candidate = assignment_events[index]
+        if candidate.event_type != EventType.assignment:
+            continue
+        merged_message = candidate.message
+        if (
+            status_event.message
+            and status_event.message != STATUS_EVENT_MESSAGES[JobStatus.assigned]
+            and status_event.message != candidate.message
+        ):
+            merged_message = f"{candidate.message}. {status_event.message}"
+        assignment_events[index] = EventSpec(
+            message=merged_message,
+            event_type=candidate.event_type,
+            target_status=status_event.target_status,
+            reason_code=status_event.reason_code,
+            responsibility_stage=status_event.responsibility_stage,
+            owner_scope=status_event.owner_scope,
+            responsibility_owner=status_event.responsibility_owner,
+            assigned_org_id=candidate.assigned_org_id,
+            assigned_contractor_user_id=candidate.assigned_contractor_user_id,
+        )
+        return assignment_events, True
+
+    return assignment_events, False
+
+
 @router.patch("/jobs/{job_id}", response_model=JobRead)
 def update_job(
     job_id: uuid.UUID,
@@ -473,7 +515,11 @@ def update_job(
             owner_scope=transition_scope,
             responsibility_owner=transition_owner,
         )
-        if status_event is not None:
+        messages, merged_assignment_status = merge_assignment_status_event(
+            assignment_events=messages,
+            status_event=status_event,
+        )
+        if status_event is not None and not merged_assignment_status:
             messages.append(status_event)
 
     for spec in messages:

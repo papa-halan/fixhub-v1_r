@@ -35,7 +35,7 @@ def test_alembic_has_a_single_head() -> None:
     config = alembic_config("sqlite+pysqlite:///./fixhub.db")
     script = ScriptDirectory.from_config(config)
 
-    assert list(script.get_heads()) == ["20260404_0013"]
+    assert list(script.get_heads()) == ["20260404_0015"]
 
 
 def test_demo_mode_without_database_url_uses_local_sqlite_database(monkeypatch) -> None:
@@ -981,3 +981,196 @@ def test_event_label_snapshot_migration_backfills_historical_display_fields(tmp_
     assert row.assigned_contractor_name_snapshot == "Devon Contractor"
     assert row.location_snapshot == "Callaghan Campus > Block A > Block A Room 14"
     assert row.asset_snapshot == "Sink"
+
+
+def test_job_actor_subject_split_migration_backfills_reported_resident_and_report_creator(tmp_path) -> None:
+    database_url = sqlite_database_url(tmp_path / "job-actor-subject-split.db")
+    config = alembic_config(database_url)
+    command.upgrade(config, "20260404_0013")
+
+    engine = create_engine(database_url, future=True)
+    metadata = sa.MetaData()
+    organisations = sa.Table(
+        "organisations",
+        metadata,
+        sa.Column("id", sa.Uuid()),
+        sa.Column("name", sa.Text()),
+        sa.Column("type", sa.Text()),
+        sa.Column("contractor_mode", sa.Text()),
+        sa.Column("created_at", sa.DateTime(timezone=True)),
+    )
+    users = sa.Table(
+        "users",
+        metadata,
+        sa.Column("id", sa.Uuid()),
+        sa.Column("name", sa.Text()),
+        sa.Column("email", sa.Text()),
+        sa.Column("role", sa.Text()),
+        sa.Column("organisation_id", sa.Uuid()),
+        sa.Column("is_demo_account", sa.Boolean()),
+        sa.Column("password_hash", sa.Text()),
+        sa.Column("created_at", sa.DateTime(timezone=True)),
+    )
+    locations = sa.Table(
+        "locations",
+        metadata,
+        sa.Column("id", sa.Uuid()),
+        sa.Column("organisation_id", sa.Uuid()),
+        sa.Column("parent_id", sa.Uuid()),
+        sa.Column("name", sa.Text()),
+        sa.Column("type", sa.Text()),
+        sa.Column("created_at", sa.DateTime(timezone=True)),
+    )
+    jobs = sa.Table(
+        "jobs",
+        metadata,
+        sa.Column("id", sa.Uuid()),
+        sa.Column("title", sa.Text()),
+        sa.Column("description", sa.Text()),
+        sa.Column("location_snapshot", sa.Text()),
+        sa.Column("asset_snapshot", sa.Text()),
+        sa.Column("status", sa.Text()),
+        sa.Column("created_by", sa.Uuid()),
+        sa.Column("assigned_org_id", sa.Uuid()),
+        sa.Column("assigned_contractor_user_id", sa.Uuid()),
+        sa.Column("organisation_id", sa.Uuid()),
+        sa.Column("location_id", sa.Uuid()),
+        sa.Column("location_detail_text", sa.Text()),
+        sa.Column("asset_id", sa.Uuid()),
+        sa.Column("created_at", sa.DateTime(timezone=True)),
+        sa.Column("updated_at", sa.DateTime(timezone=True)),
+    )
+    events = sa.Table(
+        "events",
+        metadata,
+        sa.Column("id", sa.Uuid()),
+        sa.Column("job_id", sa.Uuid()),
+        sa.Column("actor_user_id", sa.Uuid()),
+        sa.Column("actor_org_id", sa.Uuid()),
+        sa.Column("assigned_org_id", sa.Uuid()),
+        sa.Column("assigned_contractor_user_id", sa.Uuid()),
+        sa.Column("location_id", sa.Uuid()),
+        sa.Column("asset_id", sa.Uuid()),
+        sa.Column("event_type", sa.Text()),
+        sa.Column("target_status", sa.Text()),
+        sa.Column("message", sa.Text()),
+        sa.Column("reason_code", sa.Text()),
+        sa.Column("responsibility_stage", sa.Text()),
+        sa.Column("owner_scope", sa.Text()),
+        sa.Column("responsibility_owner", sa.Text()),
+        sa.Column("created_at", sa.DateTime(timezone=True)),
+    )
+
+    tenant_org_id = uuid.uuid4()
+    resident_user_id = uuid.uuid4()
+    reception_user_id = uuid.uuid4()
+    location_id = uuid.uuid4()
+    job_id = uuid.uuid4()
+    event_id = uuid.uuid4()
+    now = datetime.now(timezone.utc)
+
+    with engine.begin() as connection:
+        connection.execute(
+            sa.insert(organisations).values(
+                id=tenant_org_id,
+                name="Student Living",
+                type="university",
+                contractor_mode=None,
+                created_at=now,
+            )
+        )
+        connection.execute(
+            sa.insert(users),
+            [
+                {
+                    "id": resident_user_id,
+                    "name": "Riley Resident",
+                    "email": "resident@example.com",
+                    "role": "resident",
+                    "organisation_id": tenant_org_id,
+                    "is_demo_account": False,
+                    "password_hash": "scrypt$placeholder",
+                    "created_at": now,
+                },
+                {
+                    "id": reception_user_id,
+                    "name": "Fran Front Desk",
+                    "email": "reception@example.com",
+                    "role": "reception_admin",
+                    "organisation_id": tenant_org_id,
+                    "is_demo_account": False,
+                    "password_hash": "scrypt$placeholder",
+                    "created_at": now,
+                },
+            ],
+        )
+        connection.execute(
+            sa.insert(locations).values(
+                id=location_id,
+                organisation_id=tenant_org_id,
+                parent_id=None,
+                name="Block A Room 14",
+                type="unit",
+                created_at=now,
+            )
+        )
+        connection.execute(
+            sa.insert(jobs).values(
+                id=job_id,
+                title="Staff logged blocked shower drain",
+                description="Resident reported the blocked drain at the desk.",
+                location_snapshot="Callaghan Campus > Block A > Block A Room 14",
+                asset_snapshot=None,
+                status="new",
+                created_by=resident_user_id,
+                assigned_org_id=None,
+                assigned_contractor_user_id=None,
+                organisation_id=tenant_org_id,
+                location_id=location_id,
+                location_detail_text=None,
+                asset_id=None,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        connection.execute(
+            sa.insert(events).values(
+                id=event_id,
+                job_id=job_id,
+                actor_user_id=reception_user_id,
+                actor_org_id=tenant_org_id,
+                assigned_org_id=None,
+                assigned_contractor_user_id=None,
+                location_id=location_id,
+                asset_id=None,
+                event_type="report_created",
+                target_status="new",
+                message="Fran Front Desk logged this issue on behalf of Riley Resident.",
+                reason_code="staff_created",
+                responsibility_stage="reception",
+                owner_scope="user",
+                responsibility_owner="reception_admin",
+                created_at=now,
+            )
+        )
+
+    command.upgrade(config, "head")
+
+    migrated_jobs = sa.Table(
+        "jobs",
+        sa.MetaData(),
+        sa.Column("id", sa.Uuid()),
+        sa.Column("created_by", sa.Uuid()),
+        sa.Column("reported_for_user_id", sa.Uuid()),
+    )
+
+    with engine.connect() as connection:
+        created_by, reported_for_user_id = connection.execute(
+            sa.select(
+                migrated_jobs.c.created_by,
+                migrated_jobs.c.reported_for_user_id,
+            ).where(migrated_jobs.c.id == job_id)
+        ).one()
+
+    assert created_by == reception_user_id
+    assert reported_for_user_id == resident_user_id

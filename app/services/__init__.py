@@ -1,9 +1,16 @@
 from app.services.auth import AuthenticationError, authenticate_user
 from app.services.bootstrap import ensure_bootstrap_user
-from app.services.catalog import build_location_asset_catalog, find_asset_by_name, location_label
+from app.services.catalog import (
+    build_location_asset_catalog,
+    can_user_report_location,
+    find_asset_by_name,
+    location_label,
+    reportable_locations_for_user,
+)
 from app.services.demo import ensure_demo_data, is_demo_user_email, list_demo_users
 from app.services.passwords import hash_password, verify_password
 from app.services.projections import (
+    derive_activity_gap,
     derive_assignment_projection,
     derive_coordination_projection,
     derive_job_status_from_events,
@@ -69,10 +76,12 @@ __all__ = [
     "assignee_scope",
     "available_status_actions",
     "build_location_asset_catalog",
+    "can_user_report_location",
     "default_owner_scope",
     "default_responsibility_owner",
     "default_stage_for_actor",
     "derive_assignment_projection",
+    "derive_activity_gap",
     "derive_coordination_projection",
     "derive_job_status_from_events",
     "derive_pending_signal",
@@ -87,6 +96,7 @@ __all__ = [
     "list_demo_users",
     "location_label",
     "latest_role_update",
+    "reportable_locations_for_user",
     "sync_job_assignment_from_events",
     "require_status_permission",
     "role_label",

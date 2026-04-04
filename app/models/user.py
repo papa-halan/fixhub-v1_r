@@ -13,6 +13,7 @@ from app.models.enums import UserRole
 if TYPE_CHECKING:
     from app.models.event import Event
     from app.models.job import Job
+    from app.models.location import Location
     from app.models.organisation import Organisation
 
 
@@ -38,12 +39,18 @@ class User(Base):
         nullable=True,
         index=True,
     )
+    home_location_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("locations.id"),
+        nullable=True,
+        index=True,
+    )
     created_at: Mapped[datetime] = created_timestamp()
 
     organisation: Mapped[Organisation | None] = relationship(
         back_populates="users",
         foreign_keys=[organisation_id],
     )
+    home_location: Mapped[Location | None] = relationship(foreign_keys=[home_location_id])
     created_jobs: Mapped[list[Job]] = relationship(
         back_populates="creator",
         foreign_keys="Job.created_by",

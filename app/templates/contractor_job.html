@@ -12,6 +12,10 @@
           <strong>{{ job.status_label }}</strong>
         </div>
         <div class="meta-item">
+          <span>Resident</span>
+          <strong>{{ job.reported_for_user_name }}</strong>
+        </div>
+        <div class="meta-item">
           <span>Current coordination</span>
           <strong>{{ job.coordination_headline }}</strong>
         </div>
@@ -161,6 +165,25 @@
     </section>
     {% endif %}
 
+    {% if job.activity_gap_at %}
+    <section class="panel">
+      <div class="panel-header">
+        <h2>Workflow state unchanged</h2>
+        <p>{{ job.activity_gap_headline }}</p>
+      </div>
+      <div class="meta-list">
+        <div class="meta-item">
+          <span>Newer coordination update</span>
+          <strong>{{ job.activity_gap_at|timestamp }}</strong>
+        </div>
+        <div class="meta-item">
+          <span>What changed without a state move</span>
+          <strong>{{ job.activity_gap_summary }}</strong>
+        </div>
+      </div>
+    </section>
+    {% endif %}
+
     {% if job.visit_plan_headline %}
     <section class="panel">
       <div class="panel-header">
@@ -171,6 +194,18 @@
         <div class="meta-item">
           <span>Plan check</span>
           <strong>{{ job.visit_plan_summary }}</strong>
+        </div>
+        <div class="meta-item">
+          <span>Current dispatch</span>
+          <strong>
+            {% if job.visit_dispatch_at %}
+            {{ job.visit_dispatch_message }}{% if job.visit_dispatch_actor_label %} ({{ job.visit_dispatch_actor_label }}){% endif %} at {{ job.visit_dispatch_at|timestamp }}
+            {% elif job.assignee_label %}
+            {{ job.assignee_label }}
+            {% else %}
+            No dispatch target recorded yet
+            {% endif %}
+          </strong>
         </div>
         <div class="meta-item">
           <span>Booked attendance</span>

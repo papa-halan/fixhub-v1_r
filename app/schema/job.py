@@ -116,8 +116,14 @@ class JobRead(SchemaModel):
     pending_signal_summary: str | None = None
     pending_signal_actor_label: str | None = None
     pending_signal_at: datetime | None = None
+    activity_gap_headline: str | None = None
+    activity_gap_summary: str | None = None
+    activity_gap_at: datetime | None = None
     visit_plan_headline: str | None = None
     visit_plan_summary: str | None = None
+    visit_dispatch_message: str | None = None
+    visit_dispatch_actor_label: str | None = None
+    visit_dispatch_at: datetime | None = None
     visit_booking_message: str | None = None
     visit_booking_actor_label: str | None = None
     visit_booking_at: datetime | None = None

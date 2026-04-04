@@ -24,6 +24,7 @@ from app.models import (
 )
 from app.services import (
     OPERATIONS_ROLES,
+    derive_activity_gap,
     derive_assignment_projection,
     derive_coordination_projection,
     derive_pending_signal,
@@ -294,6 +295,7 @@ def serialize_job(job: Job) -> dict[str, object]:
     projection = derive_coordination_projection(job, job.events)
     pending_signal = derive_pending_signal(job, job.events)
     visit_plan = derive_visit_plan(job, job.events)
+    activity_gap = derive_activity_gap(job, job.events)
     latest_event = max(job.events, key=lambda event: (event.created_at, event.id)) if job.events else None
     lifecycle_event = (
         next((event for event in job.events if event.id == projection.latest_lifecycle_event_id), None)
@@ -380,8 +382,14 @@ def serialize_job(job: Job) -> dict[str, object]:
         "pending_signal_summary": pending_signal.summary if pending_signal is not None else None,
         "pending_signal_actor_label": pending_signal.actor_label if pending_signal is not None else None,
         "pending_signal_at": pending_signal.created_at if pending_signal is not None else None,
+        "activity_gap_headline": activity_gap.headline if activity_gap is not None else None,
+        "activity_gap_summary": activity_gap.summary if activity_gap is not None else None,
+        "activity_gap_at": activity_gap.latest_event_at if activity_gap is not None else None,
         "visit_plan_headline": visit_plan.headline if visit_plan is not None else None,
         "visit_plan_summary": visit_plan.summary if visit_plan is not None else None,
+        "visit_dispatch_message": visit_plan.dispatch_message if visit_plan is not None else None,
+        "visit_dispatch_actor_label": visit_plan.dispatch_actor_label if visit_plan is not None else None,
+        "visit_dispatch_at": visit_plan.dispatch_at if visit_plan is not None else None,
         "visit_booking_message": visit_plan.booking_message if visit_plan is not None else None,
         "visit_booking_actor_label": visit_plan.booking_actor_label if visit_plan is not None else None,
         "visit_booking_at": visit_plan.booking_at if visit_plan is not None else None,
@@ -509,6 +517,7 @@ VISIT_PLAN_ATTENTION_HEADLINES = {
 def build_focus_counts(jobs: list[dict[str, object]]) -> dict[str, int]:
     return {
         "response_needed": len([job for job in jobs if job.get("pending_signal_at") is not None]),
+        "state_gap": len([job for job in jobs if job.get("activity_gap_at") is not None]),
         "visit_attention": len(
             [
                 job
@@ -588,8 +597,8 @@ def derive_report_intake(job: Job) -> ReportIntakeProjection:
 
 def contractor_has_current_assignment(job: Job, user: User) -> bool:
     assignment = derive_assignment_projection(job, job.events)
-    if assignment.assigned_contractor_user_id == user.id:
-        return True
+    if assignment.assigned_contractor_user_id is not None:
+        return assignment.assigned_contractor_user_id == user.id
     return bool(user.organisation_id and assignment.assigned_org_id == user.organisation_id)
 
 
@@ -638,6 +647,13 @@ def visible_events(session: Session, job_id: uuid.UUID) -> list[Event]:
     return list(session.scalars(event_query(job_id)))
 
 
+def job_activity_sort_key(job: Job) -> tuple[datetime, datetime, uuid.UUID]:
+    projection = derive_coordination_projection(job, job.events)
+    latest_event_at = projection.latest_event_at or job.created_at
+    latest_lifecycle_event_at = projection.latest_lifecycle_event_at or job.created_at
+    return latest_event_at, latest_lifecycle_event_at, job.id
+
+
 def visible_jobs(
     session: Session,
     user: User,
@@ -658,6 +674,7 @@ def visible_jobs(
     else:
         jobs = list(session.scalars(stmt))
         visible = [job for job in jobs if contractor_can_view_job(job, user)]
+        visible.sort(key=job_activity_sort_key, reverse=True)
         if assigned:
             return contractor_assigned_jobs(visible, user)
         return visible
@@ -665,6 +682,7 @@ def visible_jobs(
     jobs = list(session.scalars(stmt))
     if assigned:
         jobs = [job for job in jobs if derive_assignment_projection(job, job.events).assignee_label is not None]
+    jobs.sort(key=job_activity_sort_key, reverse=True)
     return jobs
 
 
@@ -691,13 +709,12 @@ def related_job_records_for_user(
         matching_jobs.sort(
             key=lambda candidate: (
                 candidate.asset_id == job.asset_id,
-                candidate.updated_at,
-                candidate.created_at,
+                *job_activity_sort_key(candidate),
             ),
             reverse=True,
         )
         return matching_jobs
-    matching_jobs.sort(key=lambda candidate: (candidate.updated_at, candidate.created_at), reverse=True)
+    matching_jobs.sort(key=job_activity_sort_key, reverse=True)
     return matching_jobs
 
 

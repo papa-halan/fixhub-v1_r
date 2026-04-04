@@ -20,6 +20,10 @@
       <span>Needs response</span>
     </div>
     <div class="stat">
+      <strong>{{ focus_counts.state_gap }}</strong>
+      <span>State unchanged</span>
+    </div>
+    <div class="stat">
       <strong>{{ focus_counts.visit_attention }}</strong>
       <span>Visit plan risk</span>
     </div>
@@ -58,6 +62,10 @@
       {% if job.pending_signal_at %}
       <p class="muted">Response-needed signal: {{ job.pending_signal_headline }} from {{ job.pending_signal_actor_label }} at {{ job.pending_signal_at|timestamp }}</p>
       <p class="muted">{{ job.pending_signal_summary }}</p>
+      {% endif %}
+      {% if job.activity_gap_at %}
+      <p class="muted">Workflow state unchanged: {{ job.activity_gap_headline }} at {{ job.activity_gap_at|timestamp }}</p>
+      <p class="muted">{{ job.activity_gap_summary }}</p>
       {% endif %}
       {% if job.latest_contractor_update_at %}
       <p class="muted">Latest field update: {{ job.latest_contractor_update_message }}{% if job.latest_contractor_update_actor_label %} ({{ job.latest_contractor_update_actor_label }}){% endif %} at {{ job.latest_contractor_update_at|timestamp }}</p>
