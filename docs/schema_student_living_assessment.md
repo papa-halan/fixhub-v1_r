@@ -1,6 +1,6 @@
 # Schema Assessment: Residence Operations Pilot
 
-Date: `2026-04-04 23:35:00 +11:00`
+Date: `2026-04-07 11:55:00 +11:00`
 
 ## Document Metadata
 
@@ -35,6 +35,7 @@ Date: `2026-04-04 23:35:00 +11:00`
 - blocked, on-hold, escalation, reopen, and follow-up paths
 - direct contractor dispatch only when the person is anchored to a contractor organisation
 - named-contractor dispatch retains contractor-organisation accountability instead of dropping back to person-only ownership
+- scheduled work can remain credibly organisation-dispatched even when the exact attending technician is not yet known
 - seeded demo dispatch paths now stay within two credible contractor lanes: external contractor organisations and an internal maintenance team
 - contractor assigned-work queues now represent the current dispatch target only, while historically involved contractors keep read-only timeline visibility
 - role-gated triage and scheduling actions
@@ -91,6 +92,7 @@ Date: `2026-04-04 23:35:00 +11:00`
 ## Repository Honesty Correction
 
 - the current repo is credible as a residence-operations coordination pilot because it keeps a shared timeline, structured location context, and org-backed dispatch accountability
+- the repo is more honest after this correction because it no longer treats missing named technicians as a workflow gap when the contractor organisation and booking are already recorded
 - the intake record is now more credible for that pilot because the repo can represent resident self-service, staff-mediated intake, after-hours handoff, and inspection-origin entry without pretending every job started in the same portal flow
 - the job row is now more truthful because it no longer has to pretend the resident and the staff intake actor are the same person
 - the current repo is not yet credible as a broader civil-works coordination platform because it still collapses intake, dispatch, attendance, and completion into one `Job`

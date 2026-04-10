@@ -204,6 +204,7 @@ def test_phase_zero_point_five_model_columns_are_present_without_phase_one_field
     assert "action_required_summary" in JobRead.model_fields
     assert "visit_plan_headline" in JobRead.model_fields
     assert "visit_booking_message" in JobRead.model_fields
+    assert "queue_priority_label" in JobRead.model_fields
 
 
 def test_location_and_job_read_models_include_phase_zero_point_five_fields() -> None:

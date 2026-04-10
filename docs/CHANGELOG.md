@@ -6,6 +6,16 @@
 - Reviewer: `schema-test-automation`
 - Status: `active`
 
+## [0.6.19] - 2026-04-07 11:55:00 +11:00
+
+### Changed
+- visit-plan projection no longer treats a scheduled job assigned to a contractor organisation as incomplete just because no named technician is recorded
+- updated app and projection regression coverage so organisation-level dispatch remains a truthful pilot path and direct user assignment stays optional
+- refreshed README and architecture docs to remove the implicit demo-era bias toward always naming an individual attendee
+
+### Notes
+- this run removed a misleading coordination assumption without widening the current Phase 0.5 job or event model
+
 ## [0.6.18] - 2026-04-04 23:35:00 +11:00
 
 ### Changed

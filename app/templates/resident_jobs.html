@@ -44,6 +44,10 @@
       <p class="muted">Logged via {{ job.intake_channel_label }}{% if job.reported_by_actor_label and job.intake_channel != "resident_portal" %} by {{ job.reported_by_actor_label }}{% endif %}</p>
       {% endif %}
       <p>{{ job.coordination_headline }}</p>
+      {% if job.queue_priority_label %}
+      <p class="muted">Pilot priority: {{ job.queue_priority_label }}</p>
+      <p class="muted">{{ job.queue_priority_summary }}</p>
+      {% endif %}
       <p class="muted">Contractor org: {{ job.assigned_org_name or "Waiting for operations" }}</p>
       <p class="muted">Named worker: {{ job.assigned_contractor_name or "Not selected" }}</p>
       <p class="muted">Next owner: {{ job.coordination_owner_label }}</p>

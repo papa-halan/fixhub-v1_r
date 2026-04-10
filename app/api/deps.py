@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import Depends, HTTPException, Request, status
@@ -70,6 +70,13 @@ class OperationalHistoryProjection:
 
 
 @dataclass(frozen=True)
+class QueuePriorityProjection:
+    label: str
+    summary: str
+    rank: int
+
+
+@dataclass(frozen=True)
 class ReportIntakeProjection:
     channel: str | None
     channel_label: str | None
@@ -83,6 +90,13 @@ REPORT_CHANNEL_LABELS = {
     ReportChannel.security_after_hours.value: "After-hours support",
     ReportChannel.inspection_housekeeping.value: "Inspection or housekeeping",
 }
+
+BLOCKED_QUEUE_PRIORITY_RANK = 0
+RESPONSE_NEEDED_QUEUE_PRIORITY_RANK = 1
+VISIT_ATTENTION_QUEUE_PRIORITY_RANK = 2
+REPEAT_OPEN_QUEUE_PRIORITY_RANK = 3
+STATE_GAP_QUEUE_PRIORITY_RANK = 4
+RECENT_ACTIVITY_QUEUE_PRIORITY_RANK = 5
 
 
 def get_session(request: Request):
@@ -150,7 +164,14 @@ def lookup_current_user(
     session: Session,
 ) -> tuple[bool, User | None]:
     if hasattr(request.state, "current_user") and hasattr(request.state, "invalid_session"):
-        return bool(request.state.invalid_session), request.state.current_user
+        cached_user = request.state.current_user
+        if cached_user is None:
+            return bool(request.state.invalid_session), None
+        bound_user = session.scalar(user_query().where(User.id == cached_user.id).limit(1))
+        if bound_user is None:
+            return True, None
+        request.state.current_user = bound_user
+        return bool(request.state.invalid_session), bound_user
 
     settings = request.app.state.settings
     token = (request.cookies.get(settings.session_cookie_name) or "").strip()
@@ -404,6 +425,9 @@ def serialize_job(job: Job) -> dict[str, object]:
         "operational_history_location_job_count": 0,
         "operational_history_asset_job_count": 0,
         "operational_history_open_job_count": 0,
+        "queue_priority_label": None,
+        "queue_priority_summary": None,
+        "queue_priority_rank": RECENT_ACTIVITY_QUEUE_PRIORITY_RANK,
         "created_at": job.created_at,
         "updated_at": job.updated_at,
     }
@@ -428,6 +452,14 @@ def serialize_job_for_user(
             "operational_history_location_job_count": history.location_job_count,
             "operational_history_asset_job_count": history.asset_job_count,
             "operational_history_open_job_count": history.open_job_count,
+        }
+    )
+    queue_priority = derive_queue_priority(payload)
+    payload.update(
+        {
+            "queue_priority_label": queue_priority.label,
+            "queue_priority_summary": queue_priority.summary,
+            "queue_priority_rank": queue_priority.rank,
         }
     )
     return payload
@@ -536,6 +568,67 @@ def build_focus_counts(jobs: list[dict[str, object]]) -> dict[str, int]:
     }
 
 
+def derive_queue_priority(job: dict[str, object]) -> QueuePriorityProjection:
+    if job.get("status") == JobStatus.blocked.value:
+        return QueuePriorityProjection(
+            label="Blocked coordination",
+            summary="Site work is blocked and needs a rebooking, access fix, or escalation path.",
+            rank=BLOCKED_QUEUE_PRIORITY_RANK,
+        )
+    if job.get("pending_signal_at") is not None:
+        return QueuePriorityProjection(
+            label="Waiting on response",
+            summary=str(job.get("pending_signal_headline") or "A newer coordination signal needs follow-through."),
+            rank=RESPONSE_NEEDED_QUEUE_PRIORITY_RANK,
+        )
+    if job.get("visit_plan_headline") in VISIT_PLAN_ATTENTION_HEADLINES:
+        return QueuePriorityProjection(
+            label="Visit plan at risk",
+            summary=str(job.get("visit_plan_headline") or "Attendance planning is incomplete."),
+            rank=VISIT_ATTENTION_QUEUE_PRIORITY_RANK,
+        )
+    if int(job.get("operational_history_open_job_count") or 0) > 0:
+        return QueuePriorityProjection(
+            label="Repeat work still open",
+            summary=str(job.get("operational_history_headline") or "Related work at this location is still open."),
+            rank=REPEAT_OPEN_QUEUE_PRIORITY_RANK,
+        )
+    if job.get("activity_gap_at") is not None:
+        return QueuePriorityProjection(
+            label="Progress update not reflected in state",
+            summary=str(job.get("activity_gap_headline") or "A newer coordination update has not changed workflow state."),
+            rank=STATE_GAP_QUEUE_PRIORITY_RANK,
+        )
+    return QueuePriorityProjection(
+        label="Recently active",
+        summary="No immediate coordination risk is ahead of the latest timeline activity.",
+        rank=RECENT_ACTIVITY_QUEUE_PRIORITY_RANK,
+    )
+
+
+def _sortable_timestamp(value: object) -> float:
+    if isinstance(value, datetime):
+        return value.timestamp()
+    return datetime(1970, 1, 1, tzinfo=timezone.utc).timestamp()
+
+
+def queue_job_sort_key(job: dict[str, object]) -> tuple[int, float, float, str]:
+    latest_event_at = _sortable_timestamp(job.get("latest_event_at") or job.get("updated_at"))
+    latest_lifecycle_event_at = _sortable_timestamp(
+        job.get("latest_lifecycle_event_at") or job.get("created_at")
+    )
+    return (
+        int(job.get("queue_priority_rank") or RECENT_ACTIVITY_QUEUE_PRIORITY_RANK),
+        -latest_event_at,
+        -latest_lifecycle_event_at,
+        str(job.get("id") or ""),
+    )
+
+
+def sort_jobs_for_queue(jobs: list[dict[str, object]]) -> list[dict[str, object]]:
+    return sorted(jobs, key=queue_job_sort_key, reverse=False)
+
+
 def serialize_related_job(job: Job, *, current_job: Job) -> dict[str, object]:
     projection = derive_coordination_projection(job, job.events)
     return {
@@ -547,11 +640,7 @@ def serialize_related_job(job: Job, *, current_job: Job) -> dict[str, object]:
         "reported_for_user_name": job_reported_for_name(job),
         "created_at": job.created_at,
         "updated_at": job.updated_at,
-        "match_label": (
-            "Same asset"
-            if current_job.asset_id is not None and job.asset_id == current_job.asset_id
-            else "Same location"
-        ),
+        "match_label": related_job_match_label(job, current_job=current_job),
     }
 
 
@@ -704,18 +793,52 @@ def related_job_records_for_user(
     job: Job,
 ) -> list[Job]:
     related_jobs = [candidate for candidate in visible_jobs(session, user) if candidate.id != job.id]
-    matching_jobs = [candidate for candidate in related_jobs if candidate.location_id == job.location_id]
-    if job.asset_id is not None:
-        matching_jobs.sort(
-            key=lambda candidate: (
-                candidate.asset_id == job.asset_id,
-                *job_activity_sort_key(candidate),
-            ),
-            reverse=True,
-        )
-        return matching_jobs
-    matching_jobs.sort(key=job_activity_sort_key, reverse=True)
+    matching_jobs = [candidate for candidate in related_jobs if jobs_share_location_context(candidate, current_job=job)]
+    matching_jobs.sort(
+        key=lambda candidate: related_job_sort_key(candidate, current_job=job),
+        reverse=True,
+    )
     return matching_jobs
+
+
+def location_parent_id(job: Job) -> uuid.UUID | None:
+    location = getattr(job, "location", None)
+    if location is None:
+        return None
+    return getattr(location, "parent_id", None)
+
+
+def jobs_share_location_context(candidate: Job, *, current_job: Job) -> bool:
+    if candidate.location_id == current_job.location_id:
+        return True
+
+    current_parent_id = location_parent_id(current_job)
+    candidate_parent_id = location_parent_id(candidate)
+    if current_parent_id is None or candidate_parent_id is None:
+        return False
+
+    return current_parent_id == candidate_parent_id
+
+
+def related_job_match_label(job: Job, *, current_job: Job) -> str:
+    if current_job.asset_id is not None and job.asset_id == current_job.asset_id:
+        return "Same asset"
+    if job.location_id == current_job.location_id:
+        return "Same location"
+    if jobs_share_location_context(job, current_job=current_job):
+        return "Same parent area"
+    return "Related location context"
+
+
+def related_job_sort_key(job: Job, *, current_job: Job) -> tuple[bool, bool, datetime, datetime, uuid.UUID]:
+    activity_sort = job_activity_sort_key(job)
+    return (
+        current_job.asset_id is not None and job.asset_id == current_job.asset_id,
+        job.location_id == current_job.location_id,
+        activity_sort[0],
+        activity_sort[1],
+        activity_sort[2],
+    )
 
 
 def operational_history_for_user(
@@ -726,6 +849,8 @@ def operational_history_for_user(
 ) -> OperationalHistoryProjection:
     related_jobs = related_job_records_for_user(session, user, job=job)
     location_job_count = len(related_jobs)
+    exact_location_job_count = len([candidate for candidate in related_jobs if candidate.location_id == job.location_id])
+    nearby_area_job_count = location_job_count - exact_location_job_count
     asset_job_count = (
         len([candidate for candidate in related_jobs if job.asset_id is not None and candidate.asset_id == job.asset_id])
         if job.asset_id is not None
@@ -765,18 +890,31 @@ def operational_history_for_user(
     latest_related_projection = derive_coordination_projection(latest_related, latest_related.events)
     if asset_job_count > 0:
         headline = "Repeat issue risk on this asset"
-    else:
+    elif exact_location_job_count > 0:
         headline = "Repeat issue risk at this location"
+    else:
+        headline = "Related operational history in this area"
 
-    if job.asset_id is not None:
+    if nearby_area_job_count == 0 and job.asset_id is not None:
         scope_summary = (
             f"{location_job_count} other visible job(s) here, including {asset_job_count} on this asset. "
             f"{open_asset_job_count} related asset job(s) are still open."
         )
-    else:
+    elif nearby_area_job_count == 0:
         scope_summary = (
             f"{location_job_count} other visible job(s) here; this job has no asset selected so repeat checks stay "
             "location-based"
+        )
+    elif job.asset_id is not None:
+        scope_summary = (
+            f"{exact_location_job_count} other visible job(s) at this exact location and {nearby_area_job_count} "
+            f"more in the same parent area. {asset_job_count} related job(s) are on this asset. "
+            f"{open_asset_job_count} related asset job(s) are still open."
+        )
+    else:
+        scope_summary = (
+            f"{exact_location_job_count} other visible job(s) at this exact location and {nearby_area_job_count} "
+            "more in the same parent area; this job has no asset selected so repeat checks stay location-based."
         )
 
     return OperationalHistoryProjection(

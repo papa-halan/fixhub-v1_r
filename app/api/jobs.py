@@ -78,6 +78,12 @@ ASSIGNMENT_ENDING_STATUSES = {
     JobStatus.cancelled,
     JobStatus.reopened,
 }
+CONTRACTOR_FIELD_OWNERSHIP_STATUSES = {
+    JobStatus.scheduled,
+    JobStatus.in_progress,
+    JobStatus.blocked,
+    JobStatus.follow_up_scheduled,
+}
 
 
 def report_created_message(*, intake_channel: ReportChannel, current_user: User, reporter: User) -> str:
@@ -303,6 +309,36 @@ def build_assignment_end_event(*, job: Job) -> EventSpec | None:
     )
 
 
+def build_contractor_field_ownership_event(*, job: Job, actor: User) -> EventSpec | None:
+    if actor.role != UserRole.contractor:
+        return None
+    if actor.organisation_id is None or actor.organisation_id != job.assigned_org_id:
+        return None
+    if job.assigned_contractor_user_id == actor.id:
+        return None
+    if job.assigned_contractor_user_id is not None:
+        return None
+    if job.status not in CONTRACTOR_FIELD_OWNERSHIP_STATUSES:
+        return None
+
+    job.assigned_contractor = actor
+    job.assigned_contractor_user_id = actor.id
+    if job.assigned_org is None and actor.organisation is not None:
+        job.assigned_org = actor.organisation
+        job.assigned_org_id = actor.organisation_id
+
+    organisation_name = actor.organisation.name if actor.organisation is not None else "their organisation"
+    return EventSpec(
+        message=f"{actor.name} took field ownership for {organisation_name}",
+        event_type=EventType.assignment,
+        responsibility_stage=ResponsibilityStage.execution,
+        owner_scope=OwnerScope.user,
+        responsibility_owner=ResponsibilityOwner.contractor,
+        assigned_org_id=job.assigned_org_id,
+        assigned_contractor_user_id=job.assigned_contractor_user_id,
+    )
+
+
 def apply_assignment_change(
     *,
     session: Session,
@@ -493,6 +529,9 @@ def update_job(
         payload=payload,
         explicit_status_change=explicit_status_change,
     )
+    field_ownership_event = build_contractor_field_ownership_event(job=job, actor=current_user)
+    if field_ownership_event is not None:
+        messages.append(field_ownership_event)
 
     requested_status = changes.get("status")
     assignment_end_event: EventSpec | None = None
@@ -615,6 +654,22 @@ def add_event(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only the currently assigned contractor can update this job",
+        )
+    field_ownership_event = build_contractor_field_ownership_event(job=job, actor=current_user)
+    if field_ownership_event is not None:
+        append_event(
+            session,
+            job=job,
+            actor=current_user,
+            message=field_ownership_event.message,
+            event_type=field_ownership_event.event_type,
+            target_status=field_ownership_event.target_status,
+            reason_code=field_ownership_event.reason_code,
+            responsibility_stage=field_ownership_event.responsibility_stage,
+            owner_scope=field_ownership_event.owner_scope,
+            responsibility_owner=field_ownership_event.responsibility_owner,
+            assigned_org_id=field_ownership_event.assigned_org_id,
+            assigned_contractor_user_id=field_ownership_event.assigned_contractor_user_id,
         )
     event = append_event(
         session,

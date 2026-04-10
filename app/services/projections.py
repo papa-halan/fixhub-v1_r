@@ -776,18 +776,15 @@ def derive_visit_plan(job: Any, events: Iterable[Any]) -> VisitPlanProjection | 
     elif schedule_event is not None and assignment.assignee_label is None:
         headline = "Visit is booked but no dispatch target is recorded"
         summary = "Record who is actually carrying the visit so resident, staff, and field updates stay credible."
-    elif (
-        schedule_event is not None
-        and assignment.assigned_org_id is not None
-        and assignment.assigned_contractor_user_id is None
-    ):
-        headline = "Visit is booked but no named attendee is recorded"
-        summary = (
-            "The timeline shows a contractor organisation, but not the person expected on site for this visit."
-        )
     elif schedule_event is not None:
         headline = "Current visit plan is recorded"
-        summary = "Use the booked window and latest access note as the working attendance plan."
+        if assignment.assigned_org_id is not None and assignment.assigned_contractor_user_id is None:
+            summary = (
+                "Use the booked window and contractor organisation as the working attendance plan. "
+                "A named field worker can be added later if operations actually know it."
+            )
+        else:
+            summary = "Use the booked window and latest access note as the working attendance plan."
         if access_at is not None and schedule_at is not None and access_at > schedule_at:
             headline = "Resident access note is newer than the booked visit"
             summary = "Apply the resident access change to the booking before the next attendance."

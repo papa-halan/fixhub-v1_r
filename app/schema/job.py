@@ -138,5 +138,8 @@ class JobRead(SchemaModel):
     operational_history_location_job_count: int = 0
     operational_history_asset_job_count: int = 0
     operational_history_open_job_count: int = 0
+    queue_priority_label: str | None = None
+    queue_priority_summary: str | None = None
+    queue_priority_rank: int = 0
     created_at: datetime
     updated_at: datetime

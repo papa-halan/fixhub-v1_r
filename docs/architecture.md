@@ -1,6 +1,6 @@
 # Architecture
 
-Last updated: `2026-04-04 22:05:00 +11:00`
+Last updated: `2026-04-07 11:55:00 +11:00`
 
 ## Document Metadata
 
@@ -72,5 +72,6 @@ flowchart TB
 - contractor read visibility follows recorded dispatch/participation history, while contractor write access still requires the current active dispatch target
 - contractor "assigned jobs" queues only show the current dispatch target; historical visibility stays on the job detail page instead of polluting the live work queue
 - accountability metadata, lifecycle targets, and assignment snapshots are stored on events instead of being reconstructed only from mutable job fields or free text
+- a booked visit assigned to a contractor organisation is already a credible attendance plan; naming an individual technician is optional when operations genuinely know it
 - scheduled and follow-up-scheduled states stay operations-owned coordination records until field attendance actually starts; contractor ownership begins at `in_progress`
 - the current seeded hierarchy is represented as `University of Newcastle -> Student Living`; that data is pilot context, not the product boundary

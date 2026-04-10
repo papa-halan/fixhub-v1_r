@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 import uuid
 
 from app.models import EventType, JobStatus, ResponsibilityOwner, ResponsibilityStage, UserRole
-from app.api.deps import build_focus_counts, serialize_related_job
+from app.api.deps import build_focus_counts, derive_queue_priority, serialize_related_job, sort_jobs_for_queue
 from app.services import (
     apply_status_change,
     derive_assignment_projection,
@@ -755,8 +755,12 @@ def test_visit_plan_projection_flags_booked_visit_without_named_attendee() -> No
     plan = derive_visit_plan(job, job.events)
 
     assert plan is not None
-    assert plan.headline == "Visit is booked but no named attendee is recorded"
-    assert plan.summary == "The timeline shows a contractor organisation, but not the person expected on site for this visit."
+    assert plan.headline == "Current visit plan is recorded"
+    assert (
+        plan.summary
+        == "Use the booked window and contractor organisation as the working attendance plan. "
+        "A named field worker can be added later if operations actually know it."
+    )
     assert plan.dispatch_message == "Assigned Newcastle Plumbing"
     assert plan.dispatch_actor_label == "Casey Dispatch Coordinator (Student Living)"
     assert plan.booking_message == "Booked plumber for Friday 14:00-16:00"
@@ -835,10 +839,86 @@ def test_build_focus_counts_surfaces_response_visit_and_repeat_risk() -> None:
 
     assert counts == {
         "response_needed": 1,
+        "state_gap": 0,
         "visit_attention": 2,
         "repeat_open_work": 2,
         "blocked": 1,
     }
+
+
+def test_derive_queue_priority_prefers_blocked_and_response_signals_over_generic_recency() -> None:
+    blocked_priority = derive_queue_priority(
+        {
+            "status": "blocked",
+            "pending_signal_at": datetime(2026, 4, 4, 8, 0, tzinfo=timezone.utc),
+            "pending_signal_headline": "Resident access detail needs operations follow-through",
+            "visit_plan_headline": "Access arrangement is not ready for the next visit",
+            "operational_history_open_job_count": 2,
+        }
+    )
+    response_priority = derive_queue_priority(
+        {
+            "status": "scheduled",
+            "pending_signal_at": datetime(2026, 4, 4, 9, 0, tzinfo=timezone.utc),
+            "pending_signal_headline": "Resident access detail needs operations follow-through",
+            "visit_plan_headline": "Resident access note is newer than the booked visit",
+            "operational_history_open_job_count": 0,
+        }
+    )
+    repeat_priority = derive_queue_priority(
+        {
+            "status": "triaged",
+            "pending_signal_at": None,
+            "visit_plan_headline": "Current visit plan is recorded",
+            "operational_history_open_job_count": 2,
+            "operational_history_headline": "Repeat issue risk on this asset",
+        }
+    )
+
+    assert blocked_priority.label == "Blocked coordination"
+    assert blocked_priority.rank < response_priority.rank < repeat_priority.rank
+    assert response_priority.summary == "Resident access detail needs operations follow-through"
+    assert repeat_priority.label == "Repeat work still open"
+
+
+def test_sort_jobs_for_queue_puts_response_and_repeat_risk_ahead_of_recent_activity() -> None:
+    jobs = sort_jobs_for_queue(
+        [
+            {
+                "id": uuid.uuid4(),
+                "title": "Routine recent note",
+                "queue_priority_rank": 5,
+                "latest_event_at": datetime(2026, 4, 4, 12, 0, tzinfo=timezone.utc),
+                "latest_lifecycle_event_at": datetime(2026, 4, 4, 11, 0, tzinfo=timezone.utc),
+                "updated_at": datetime(2026, 4, 4, 12, 0, tzinfo=timezone.utc),
+                "created_at": datetime(2026, 4, 4, 10, 0, tzinfo=timezone.utc),
+            },
+            {
+                "id": uuid.uuid4(),
+                "title": "Repeat leak still active",
+                "queue_priority_rank": 3,
+                "latest_event_at": datetime(2026, 4, 4, 9, 0, tzinfo=timezone.utc),
+                "latest_lifecycle_event_at": datetime(2026, 4, 4, 9, 0, tzinfo=timezone.utc),
+                "updated_at": datetime(2026, 4, 4, 9, 0, tzinfo=timezone.utc),
+                "created_at": datetime(2026, 4, 4, 8, 0, tzinfo=timezone.utc),
+            },
+            {
+                "id": uuid.uuid4(),
+                "title": "Resident access reply needed",
+                "queue_priority_rank": 1,
+                "latest_event_at": datetime(2026, 4, 4, 8, 0, tzinfo=timezone.utc),
+                "latest_lifecycle_event_at": datetime(2026, 4, 4, 7, 0, tzinfo=timezone.utc),
+                "updated_at": datetime(2026, 4, 4, 8, 0, tzinfo=timezone.utc),
+                "created_at": datetime(2026, 4, 4, 6, 0, tzinfo=timezone.utc),
+            },
+        ]
+    )
+
+    assert [job["title"] for job in jobs] == [
+        "Resident access reply needed",
+        "Repeat leak still active",
+        "Routine recent note",
+    ]
 
 
 def test_coordination_projection_treats_resident_resolution_confirmation_as_truthful_completion_signal() -> None:

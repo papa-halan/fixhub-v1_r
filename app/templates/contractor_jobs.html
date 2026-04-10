@@ -43,6 +43,10 @@
       <p class="muted">Intake: {{ job.intake_channel_label }}</p>
       {% endif %}
       <p>{{ job.coordination_headline }}</p>
+      {% if job.queue_priority_label %}
+      <p class="muted">Pilot priority: {{ job.queue_priority_label }}</p>
+      <p class="muted">{{ job.queue_priority_summary }}</p>
+      {% endif %}
       <p>{{ job.asset_name or "Asset not captured" }} - {{ job.location }}</p>
       <p class="muted">Contractor org: {{ job.assigned_org_name or "Not assigned" }}</p>
       <p class="muted">Named worker: {{ job.assigned_contractor_name or "Not selected" }}</p>

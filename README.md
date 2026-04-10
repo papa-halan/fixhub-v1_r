@@ -134,15 +134,18 @@ Reportable operational locations are managed child `space` or `unit` rows. Root-
 4. Front desk or operations staff add clarifying notes when needed.
 5. A dispatch coordinator assigns the work to a contractor organisation, and may also name a specific contractor while keeping that contractor organisation attached.
 6. A property manager triages and schedules the job.
-7. Only the currently dispatched contractor or maintenance team sees the job in the active contractor queue; earlier assignees keep read-only historical access on the detail view.
-8. Everyone reads the same shared timeline with stable location context, optional asset context, assignment snapshots on each event, and clearer intake provenance for resident-visible jobs.
+7. If an organisation-level dispatch is still unnamed when a contractor first starts posting field progress, the timeline now records an explicit assignment event naming that attending contractor before the field note or lifecycle move lands.
+8. Only the currently dispatched contractor or maintenance team sees the job in the active contractor queue; earlier assignees keep read-only historical access on the detail view.
+9. Everyone reads the same shared timeline with stable location context, optional asset context, assignment snapshots on each event, and clearer intake provenance for resident-visible jobs.
 
 Job reads keep a stored `location_snapshot` so later location renames do not rewrite the historical record for reports and timeline events. Asset-linked jobs now also keep an `asset_snapshot` so later catalog renames do not silently rewrite earlier operational records. Structured `location_id` and `asset_id` remain the relational source of truth for filtering and lookup.
 
 `jobs.created_by` now records who actually logged the coordination record, while `jobs.reported_for_user_id` keeps the resident the work belongs to. That keeps staff-mediated intake truthful without breaking resident-scoped visibility.
 
 Timeline events carry both lifecycle intent (`target_status`) and the active assignment target at the time of the update. The `jobs` row still keeps the current assignee and cached status for filtering, but the event stream is the more truthful record of what happened and who the work was pointed at when it happened.
+When execution begins from an organisation-only dispatch, the first contractor-authored field update now creates a visible assignment event that captures the named attendee instead of silently leaving field ownership ambiguous.
 Current job reads now also derive assignee labels from the latest assignment event snapshot, so later renames of contractor organisations or field workers do not silently rewrite the dispatch record people coordinated from. Pending-signal and visit-plan summaries use the same event snapshots for actor names, roles, and organisations, so later account edits do not silently rewrite who posted the coordination update people are reacting to.
+Organisation-level dispatch remains a valid pilot truth. FixHub can record a booked visit against a contractor organisation without pretending operations already know the exact field worker who will attend.
 
 Resident updates are intentionally narrow. The pilot accepts only structured resident coordination reasons that operations can act on consistently: `resident_access_update`, `resident_access_issue`, `issue_still_present`, `resident_reported_recurrence`, and `resident_confirmed_resolved`. Access reasons are valid only while coordination is still active; post-visit reasons are valid only after completion or during a recorded follow-up cycle.
 
