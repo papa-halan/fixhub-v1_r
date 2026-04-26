@@ -150,6 +150,13 @@ def test_resident_update_create_only_accepts_structured_pilot_reason_codes() -> 
 
     assert resolved_payload.reason_code == ResidentUpdateReason.resident_confirmed_resolved
 
+    appeal_payload = ResidentUpdateCreate(
+        message="I dispute the resident-liable charge attached to this visit",
+        reason_code="charge_appeal_submitted",
+    )
+
+    assert appeal_payload.reason_code == ResidentUpdateReason.charge_appeal_submitted
+
     with pytest.raises(ValidationError):
         ResidentUpdateCreate(
             message="Missing structured reason",
@@ -202,8 +209,11 @@ def test_phase_zero_point_five_model_columns_are_present_without_phase_one_field
     assert "assigned_org_id" in EventRead.model_fields
     assert "assigned_contractor_user_id" in EventRead.model_fields
     assert "action_required_summary" in JobRead.model_fields
+    assert "viewer_guidance_headline" in JobRead.model_fields
+    assert "viewer_guidance_summary" in JobRead.model_fields
     assert "visit_plan_headline" in JobRead.model_fields
     assert "visit_booking_message" in JobRead.model_fields
+    assert "pending_signal_owner_label" in JobRead.model_fields
     assert "queue_priority_label" in JobRead.model_fields
 
 
@@ -268,7 +278,13 @@ def test_location_and_job_read_models_include_phase_zero_point_five_fields() -> 
         created_at=timestamp,
         updated_at=timestamp,
     )
-    option = LocationOption(id=location_id, parent_id=None, name="Block B Laundry", type=LocationType.space)
+    option = LocationOption(
+        id=location_id,
+        parent_id=None,
+        name="Block B Laundry",
+        label="Callaghan Campus > Block B > Block B Laundry",
+        type=LocationType.space,
+    )
 
     assert location.organisation_id == organisation_id
     assert location.type == LocationType.unit

@@ -1,6 +1,6 @@
 # Schema Assessment: Residence Operations Pilot
 
-Date: `2026-04-07 11:55:00 +11:00`
+Date: `2026-04-10 15:42:17 +10:00`
 
 ## Document Metadata
 
@@ -14,6 +14,7 @@ Date: `2026-04-07 11:55:00 +11:00`
 - assignment is decoupled from status, and named-contractor dispatch now preserves both `assigned_org_id` and `assigned_contractor_user_id`
 - event records store `event_type`, `target_status`, `reason_code`, `responsibility_stage`, `owner_scope`, and assignment-target snapshots
 - `report_created` events now also carry a structured intake-channel `reason_code`, so the record can distinguish resident portal, staff-created, after-hours, and inspection-origin entry paths without inventing a second intake table yet
+- note-only events now recognize explicit handoff and post-visit accountability reason codes such as `after_hours_handoff_received`, `liability_assessed`, `charge_notice_issued`, and `charge_resolved`
 - workflow/status-transition rules live in `app/services/workflow.py`
 - operations roles are split across `reception_admin`, `triage_officer`, and `coordinator`
 - users authenticate via password login plus signed session cookies
@@ -44,6 +45,8 @@ Date: `2026-04-07 11:55:00 +11:00`
 - resident-visible timelines that preserve assignment responsibility on each recorded update
 - resident-visible reads that preserve the original location snapshot even if the managed location label changes later
 - coordination summaries, pending signals, and visit-plan actor labels that prefer event snapshots over mutable live user and organisation rows
+- resident post-visit updates can now carry a structured `charge_appeal_submitted` reason instead of forcing charge disputes into generic notes
+- completed-job timelines can now surface after-hours handoff receipt, liability review, charge notice, resident appeal, and charge-resolution signals without inventing separate Phase 1 entities
 - organisation-scoped resident reporting with managed location selection
 - operations-scoped on-behalf intake that keeps the resident attached as the visible case owner while recording which staff path created the job
 - resident visibility now follows the explicit reported-for user instead of relying on an overloaded creator field
@@ -97,6 +100,7 @@ Date: `2026-04-07 11:55:00 +11:00`
 - the job row is now more truthful because it no longer has to pretend the resident and the staff intake actor are the same person
 - the current repo is not yet credible as a broader civil-works coordination platform because it still collapses intake, dispatch, attendance, and completion into one `Job`
 - resident access updates now land on the coordination owner instead of being mis-stamped as triage work, which better matches the booked-attendance workflow already implemented
+- the event spine now stays more truthful after completion because liability review, charge notice, resident appeal, and charge resolution can be recorded as explicit coordination signals instead of collapsing back into generic notes
 - dead compatibility surface that implied a separate legacy model layer has been removed instead of being kept as misleading future-facing noise
 
 ## Deferred For Phase 1

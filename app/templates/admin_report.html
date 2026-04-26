@@ -9,7 +9,7 @@
   </div>
   <div class="panel">
     <h2>Why this matters</h2>
-    <p class="muted">The resident should stay attached as the case owner, while the first timeline event shows who actually logged the issue and which intake channel it came through.</p>
+    <p class="muted">The resident should stay attached as the case owner, while the first timeline event shows who actually logged the issue and which intake channel it came through. Intake should also stay inside the resident's real location scope so the pilot does not invent cross-campus ownership.</p>
   </div>
 </section>
 
@@ -24,10 +24,11 @@
       <select name="reported_for_user_id" {% if not resident_users %}disabled{% endif %} required>
         <option value="">Choose a resident</option>
         {% for resident in resident_users %}
-        <option value="{{ resident.id }}">{{ resident.name }} ({{ resident.email }})</option>
+        <option value="{{ resident.id }}" {% if resident.id == selected_resident_id %}selected{% endif %}>{{ resident.name }} ({{ resident.email }})</option>
         {% endfor %}
       </select>
     </label>
+    <p class="muted form-helper" data-resident-scope>{{ selected_resident_scope_summary }}</p>
     <label>
       Intake channel
       <select name="intake_channel" required>
@@ -43,7 +44,7 @@
     <label>
       Location
       <select name="location_id" {% if not location_catalog %}disabled{% endif %} required>
-        <option value="">Choose a location</option>
+        <option value="">{% if selected_resident_id %}Choose a location{% else %}Choose a resident first{% endif %}</option>
         {% for location in location_catalog %}
         <option value="{{ location.id }}">{{ location.label }}</option>
         {% endfor %}
@@ -62,7 +63,7 @@
       Description
       <textarea name="description" placeholder="Security reported water pooling in the Block B laundry and multiple machines are now stopping mid-cycle." required></textarea>
     </label>
-    <p class="muted form-helper">Pick the actual intake path instead of writing it as a loose note later. Leave asset blank if the location is known but the exact fixture is not.</p>
+    <p class="muted form-helper">Pick the actual intake path instead of writing it as a loose note later. Resident selection now narrows the location list to that resident's reportable area.</p>
     <div class="actions">
       <button class="button" type="submit" {% if not resident_users or not location_catalog %}disabled{% endif %}>Create job</button>
     </div>
@@ -71,16 +72,85 @@
 </section>
 
 <script>
-  const rememberedLocationCatalog = {{ location_catalog | tojson }};
+  const residentUsers = {{ resident_users | tojson }};
+  const residentCatalogs = Object.fromEntries(
+    residentUsers.map((resident) => [resident.id, resident.location_catalog || []])
+  );
+  const residentScopeSummaries = Object.fromEntries(
+    residentUsers.map((resident) => [
+      resident.id,
+      resident.home_location_label
+        ? `Scoped to ${resident.home_location_label} and linked shared spaces.`
+        : "This resident can use any configured reportable location.",
+    ])
+  );
+  const allLocationCatalog = Array.from(
+    new Map(
+      Object.values(residentCatalogs)
+        .flat()
+        .map((location) => [location.id, location])
+    ).values()
+  );
   const assetOptionsByLocation = Object.fromEntries(
-    rememberedLocationCatalog.map((location) => [
+    allLocationCatalog.map((location) => [
       location.id,
       location.assets.map((asset) => asset.name),
     ])
   );
+  const residentInput = document.querySelector('[name="reported_for_user_id"]');
   const locationInput = document.querySelector('[name="location_id"]');
   const assetInput = document.querySelector('[name="asset_name"]');
   const assetOptions = document.getElementById("admin-asset-options");
+  const residentScope = document.querySelector("[data-resident-scope]");
+  const submitButton = document.querySelector('#admin-report-form button[type="submit"]');
+
+  const renderResidentScope = () => {
+    if (!residentScope) {
+      return;
+    }
+    residentScope.textContent = residentInput.value
+      ? (residentScopeSummaries[residentInput.value] || "This resident can use any configured reportable location.")
+      : "Choose a resident to narrow locations to their reportable area.";
+  };
+
+  const renderLocationOptions = () => {
+    const residentLocations = residentCatalogs[residentInput.value] || [];
+    const previousLocation = locationInput.value;
+    locationInput.innerHTML = "";
+
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    if (!residentInput.value) {
+      placeholder.textContent = "Choose a resident first";
+    } else if (residentLocations.length === 0) {
+      placeholder.textContent = "No reportable locations for this resident";
+    } else {
+      placeholder.textContent = "Choose a location";
+    }
+    locationInput.appendChild(placeholder);
+
+    residentLocations.forEach((location) => {
+      const option = document.createElement("option");
+      option.value = location.id;
+      option.textContent = location.label;
+      locationInput.appendChild(option);
+    });
+
+    if (residentLocations.some((location) => location.id === previousLocation)) {
+      locationInput.value = previousLocation;
+    } else {
+      locationInput.value = "";
+    }
+
+    const hasScopedLocations = residentLocations.length > 0;
+    locationInput.disabled = !hasScopedLocations;
+    assetInput.disabled = !hasScopedLocations || !locationInput.value;
+    if (submitButton) {
+      submitButton.disabled = !residentInput.value || !hasScopedLocations;
+    }
+    renderResidentScope();
+    renderAssetOptions();
+  };
 
   const renderAssetOptions = () => {
     const assets = assetOptionsByLocation[locationInput.value] || [];
@@ -95,8 +165,9 @@
     }
   };
 
+  residentInput.addEventListener("input", renderLocationOptions);
   locationInput.addEventListener("input", renderAssetOptions);
-  renderAssetOptions();
+  renderLocationOptions();
 
   FixHub.wireJsonForm(document.getElementById("admin-report-form"), async (formData) => {
     const job = await FixHub.sendJson("/api/jobs", "POST", {

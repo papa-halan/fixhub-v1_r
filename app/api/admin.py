@@ -27,7 +27,7 @@ from app.api.deps import (
     visible_jobs,
 )
 from app.models import JobStatus, ReportChannel, User
-from app.services import ASSIGNMENT_ROLES, available_status_actions, build_location_asset_catalog, derive_coordination_projection
+from app.services import ASSIGNMENT_ROLES, available_status_actions, derive_coordination_projection
 
 
 router = APIRouter(prefix="/admin")
@@ -36,21 +36,39 @@ router = APIRouter(prefix="/admin")
 @router.get("/report", response_class=HTMLResponse, include_in_schema=False)
 def admin_report_page(
     request: Request,
+    reported_for_user_id: uuid.UUID | None = None,
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ):
     require_role(current_user, *OPERATIONS_ROLES)
+    resident_users = list_resident_users(
+        session,
+        organisation_id=current_user.organisation_id,
+        include_demo=request.app.state.settings.demo_mode,
+        include_location_scope=True,
+    )
+    selected_resident_id = str(reported_for_user_id) if reported_for_user_id is not None else None
+    selected_resident = next(
+        (resident for resident in resident_users if resident["id"] == selected_resident_id),
+        None,
+    )
     return render_page(
         request=request,
         session=session,
         current_user=current_user,
         template_name="admin_report.html",
-        resident_users=list_resident_users(
-            session,
-            organisation_id=current_user.organisation_id,
-            include_demo=request.app.state.settings.demo_mode,
+        resident_users=resident_users,
+        selected_resident_id=selected_resident_id,
+        selected_resident_scope_summary=(
+            f"Scoped to {selected_resident['home_location_label']} and linked shared spaces."
+            if selected_resident is not None and selected_resident.get("home_location_label")
+            else (
+                "This resident can use any configured reportable location."
+                if selected_resident is not None
+                else "Choose a resident to narrow locations to their reportable area."
+            )
         ),
-        location_catalog=build_location_asset_catalog(session, user=current_user),
+        location_catalog=selected_resident["location_catalog"] if selected_resident is not None else [],
         intake_channels=[
             {"value": ReportChannel.staff_created.value, "label": "Staff-created"},
             {"value": ReportChannel.security_after_hours.value, "label": "After-hours support"},
@@ -76,7 +94,7 @@ def admin_jobs_page(
         template_name="admin_jobs.html",
         jobs=jobs,
         counts=build_job_counts(jobs),
-        focus_counts=build_focus_counts(jobs),
+        focus_counts=build_focus_counts(jobs, user=current_user),
     )
 
 

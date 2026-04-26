@@ -42,6 +42,8 @@ class Job(Base):
     )
     created_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
     reported_for_user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
+    created_by_name_snapshot: Mapped[str] = mapped_column(Text, nullable=False)
+    reported_for_user_name_snapshot: Mapped[str] = mapped_column(Text, nullable=False)
     organisation_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("organisations.id"),
         nullable=False,

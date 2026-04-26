@@ -48,7 +48,7 @@ def contractor_jobs_page(
         current_user=current_user,
         template_name="contractor_jobs.html",
         jobs=jobs,
-        focus_counts=build_focus_counts(jobs),
+        focus_counts=build_focus_counts(jobs, user=current_user),
     )
 
 

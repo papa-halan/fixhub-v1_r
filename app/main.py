@@ -41,31 +41,34 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
-        require_schema_ready(engine)
-        if app_settings.seed_demo_data:
-            with session_factory() as session:
-                ensure_demo_data(session, demo_password=app_settings.demo_password)
-                ensure_bootstrap_user(
-                    session,
-                    name=app_settings.bootstrap_user_name,
-                    email=app_settings.bootstrap_user_email,
-                    password=app_settings.bootstrap_user_password,
-                    organisation_name=app_settings.bootstrap_user_org_name,
-                    role=app_settings.bootstrap_user_role,
-                )
-                session.commit()
-        elif app_settings.bootstrap_user_email and app_settings.bootstrap_user_password:
-            with session_factory() as session:
-                ensure_bootstrap_user(
-                    session,
-                    name=app_settings.bootstrap_user_name,
-                    email=app_settings.bootstrap_user_email,
-                    password=app_settings.bootstrap_user_password,
-                    organisation_name=app_settings.bootstrap_user_org_name,
-                    role=app_settings.bootstrap_user_role,
-                )
-                session.commit()
-        yield
+        try:
+            require_schema_ready(engine)
+            if app_settings.seed_demo_data:
+                with session_factory() as session:
+                    ensure_demo_data(session, demo_password=app_settings.demo_password)
+                    ensure_bootstrap_user(
+                        session,
+                        name=app_settings.bootstrap_user_name,
+                        email=app_settings.bootstrap_user_email,
+                        password=app_settings.bootstrap_user_password,
+                        organisation_name=app_settings.bootstrap_user_org_name,
+                        role=app_settings.bootstrap_user_role,
+                    )
+                    session.commit()
+            elif app_settings.bootstrap_user_email and app_settings.bootstrap_user_password:
+                with session_factory() as session:
+                    ensure_bootstrap_user(
+                        session,
+                        name=app_settings.bootstrap_user_name,
+                        email=app_settings.bootstrap_user_email,
+                        password=app_settings.bootstrap_user_password,
+                        organisation_name=app_settings.bootstrap_user_org_name,
+                        role=app_settings.bootstrap_user_role,
+                    )
+                    session.commit()
+            yield
+        finally:
+            engine.dispose()
 
     app = FastAPI(title=app_settings.app_name, lifespan=lifespan)
     app.state.engine = engine

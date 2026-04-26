@@ -4,8 +4,14 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import uuid
 
-from app.models import EventType, JobStatus, ResponsibilityOwner, ResponsibilityStage, UserRole
-from app.api.deps import build_focus_counts, derive_queue_priority, serialize_related_job, sort_jobs_for_queue
+from app.models import EventType, JobStatus, OwnerScope, ResponsibilityOwner, ResponsibilityStage, UserRole
+from app.api.deps import (
+    build_focus_counts,
+    derive_queue_priority,
+    derive_viewer_guidance,
+    serialize_related_job,
+    sort_jobs_for_queue,
+)
 from app.services import (
     apply_status_change,
     derive_assignment_projection,
@@ -76,6 +82,8 @@ class StubRelatedJob:
     creator: StubCreator
     created_at: datetime
     updated_at: datetime
+    reported_for_user_name_snapshot: str | None = None
+    location_id: uuid.UUID | None = None
     asset_id: uuid.UUID | None = None
 
 
@@ -158,7 +166,12 @@ def test_apply_status_change_returns_event_spec_without_mutating_job_status() ->
     actor = StubActor(role=UserRole.triage_officer)
     job = StubJob(status=JobStatus.assigned, events=[])
 
-    event = apply_status_change(job, JobStatus.triaged, actor)
+    event = apply_status_change(
+        job,
+        JobStatus.triaged,
+        actor,
+        message="Reviewed the issue and confirmed it is ready for the next coordination step",
+    )
 
     assert event is not None
     assert event.target_status == JobStatus.triaged
@@ -168,6 +181,7 @@ def test_apply_status_change_returns_event_spec_without_mutating_job_status() ->
 def test_coordination_projection_uses_status_timeline_and_assignment_context() -> None:
     job = StubJob(
         status=JobStatus.scheduled,
+        assigned_org_id=uuid.uuid4(),
         assigned_org=StubAssignee(name="Newcastle Plumbing"),
         events=[
             StubEvent(
@@ -195,7 +209,8 @@ def test_coordination_projection_uses_status_timeline_and_assignment_context() -
 
     assert projection.status == JobStatus.scheduled
     assert projection.headline == "Visit scheduled; waiting for contractor attendance"
-    assert projection.owner_label == "Newcastle Plumbing"
+    assert projection.owner_label == "Property manager"
+    assert projection.action_required_by == "Newcastle Plumbing"
     assert projection.responsibility_stage == "coordination"
     assert projection.responsibility_owner == "triage_officer"
     assert projection.latest_event_type == "schedule"
@@ -346,6 +361,7 @@ def test_coordination_projection_keeps_block_reason_visible_after_note_event() -
 def test_coordination_projection_keeps_scheduled_detail_tied_to_schedule_event_after_note() -> None:
     job = StubJob(
         status=JobStatus.scheduled,
+        assigned_org_id=uuid.uuid4(),
         assigned_org=StubAssignee(name="Newcastle Plumbing"),
         events=[
             StubEvent(
@@ -370,7 +386,72 @@ def test_coordination_projection_keeps_scheduled_detail_tied_to_schedule_event_a
 
     assert projection.status == JobStatus.scheduled
     assert projection.detail == "Resident approved Friday morning access window"
-    assert projection.owner_label == "Newcastle Plumbing"
+    assert projection.owner_label == "Property manager"
+    assert projection.action_required_by == "Newcastle Plumbing"
+    assert projection.latest_event_type == "note"
+    assert projection.latest_lifecycle_event_type == "schedule"
+
+
+def test_coordination_projection_keeps_scheduled_state_anchor_when_contractor_claims_field_ownership_before_attendance() -> None:
+    student_living = type("Org", (), {"name": "Student Living"})()
+    plumbing = type("Org", (), {"name": "Newcastle Plumbing"})()
+    triage = type(
+        "Actor",
+        (),
+        {"role": UserRole.triage_officer, "name": "Priya Property Manager", "organisation": student_living},
+    )()
+    contractor = type(
+        "Actor",
+        (),
+        {"role": UserRole.contractor, "name": "Devon Contractor", "organisation": plumbing},
+    )()
+    schedule_event = StubEvent(
+        id=uuid.uuid4(),
+        created_at=datetime(2026, 4, 4, 10, 0, tzinfo=timezone.utc),
+        target_status=JobStatus.scheduled,
+        event_type=EventType.schedule,
+        message="Resident approved Friday morning access window",
+        responsibility_stage=ResponsibilityStage.coordination,
+        responsibility_owner=ResponsibilityOwner.triage_officer,
+    )
+    schedule_event.actor_user = triage
+    field_owner_event = StubAssignmentEvent(
+        id=uuid.uuid4(),
+        created_at=datetime(2026, 4, 4, 11, 0, tzinfo=timezone.utc),
+        target_status=None,
+        event_type=EventType.assignment,
+        message="Devon Contractor took field ownership for Newcastle Plumbing",
+        responsibility_stage=ResponsibilityStage.execution,
+        owner_scope=OwnerScope.user,
+        responsibility_owner=ResponsibilityOwner.contractor,
+        assigned_org_id=uuid.uuid4(),
+        assigned_org=StubAssignee(name="Newcastle Plumbing"),
+        assigned_contractor_user_id=uuid.uuid4(),
+        assigned_contractor=StubAssignee(name="Devon Contractor"),
+    )
+    field_owner_event.actor_user = contractor
+    note_event = StubEvent(
+        id=uuid.uuid4(),
+        created_at=datetime(2026, 4, 4, 12, 0, tzinfo=timezone.utc),
+        target_status=None,
+        event_type=EventType.note,
+        message="Confirmed van booking and key collection path for Friday morning.",
+    )
+    note_event.actor_user = contractor
+    job = StubJob(
+        status=JobStatus.scheduled,
+        assigned_org=StubAssignee(name="Newcastle Plumbing"),
+        assigned_contractor=StubAssignee(name="Devon Contractor"),
+        events=[schedule_event, field_owner_event, note_event],
+    )
+
+    projection = derive_coordination_projection(job, job.events)
+
+    assert projection.status == JobStatus.scheduled
+    assert projection.headline == "Visit scheduled; waiting for contractor attendance"
+    assert projection.owner_label == "Property manager"
+    assert projection.action_required_by == "Devon Contractor"
+    assert projection.responsibility_owner == "triage_officer"
     assert projection.latest_event_type == "note"
     assert projection.latest_lifecycle_event_type == "schedule"
 
@@ -755,15 +836,79 @@ def test_visit_plan_projection_flags_booked_visit_without_named_attendee() -> No
     plan = derive_visit_plan(job, job.events)
 
     assert plan is not None
+    assert plan.headline == "Booked visit is waiting on contractor acknowledgement"
+    assert (
+        plan.summary
+        == "The visit window is recorded, but the dispatched contractor organisation has not confirmed the "
+        "booking in the shared timeline yet."
+    )
+    assert plan.dispatch_message == "Assigned Newcastle Plumbing"
+    assert plan.dispatch_actor_label == "Casey Dispatch Coordinator (Student Living)"
+    assert plan.booking_message == "Booked plumber for Friday 14:00-16:00"
+
+
+def test_visit_plan_projection_returns_to_current_plan_after_contractor_acknowledges_booking() -> None:
+    student_living = type("Org", (), {"name": "Student Living"})()
+    plumbing = type("Org", (), {"name": "Newcastle Plumbing"})()
+    triage = type(
+        "Actor",
+        (),
+        {"role": UserRole.triage_officer, "name": "Priya Property Manager", "organisation": student_living},
+    )()
+    coordinator = type(
+        "Actor",
+        (),
+        {"role": UserRole.coordinator, "name": "Casey Dispatch Coordinator", "organisation": student_living},
+    )()
+    contractor = type(
+        "Actor",
+        (),
+        {"role": UserRole.contractor, "name": "Devon Contractor", "organisation": plumbing},
+    )()
+    assigned_org = StubAssignee(name="Newcastle Plumbing")
+    assignment_event = StubAssignmentEvent(
+        id=uuid.uuid4(),
+        created_at=datetime(2026, 4, 4, 9, 0, tzinfo=timezone.utc),
+        target_status=None,
+        event_type=EventType.assignment,
+        message="Assigned Newcastle Plumbing",
+        assigned_org_id=uuid.uuid4(),
+        assigned_org=assigned_org,
+    )
+    assignment_event.actor_user = coordinator
+    schedule_event = StubEvent(
+        id=uuid.uuid4(),
+        created_at=datetime(2026, 4, 4, 10, 0, tzinfo=timezone.utc),
+        target_status=JobStatus.scheduled,
+        event_type=EventType.schedule,
+        message="Booked plumber for Friday 14:00-16:00",
+        responsibility_stage=ResponsibilityStage.coordination,
+    )
+    schedule_event.actor_user = triage
+    contractor_note = StubEvent(
+        id=uuid.uuid4(),
+        created_at=datetime(2026, 4, 4, 11, 0, tzinfo=timezone.utc),
+        target_status=None,
+        event_type=EventType.note,
+        message="Confirmed van booking and key collection path for Friday morning.",
+    )
+    contractor_note.actor_user = contractor
+    job = StubJob(
+        status=JobStatus.scheduled,
+        events=[assignment_event, schedule_event, contractor_note],
+        assigned_org_id=assignment_event.assigned_org_id,
+        assigned_org=assigned_org,
+    )
+
+    plan = derive_visit_plan(job, job.events)
+
+    assert plan is not None
     assert plan.headline == "Current visit plan is recorded"
     assert (
         plan.summary
         == "Use the booked window and contractor organisation as the working attendance plan. "
         "A named field worker can be added later if operations actually know it."
     )
-    assert plan.dispatch_message == "Assigned Newcastle Plumbing"
-    assert plan.dispatch_actor_label == "Casey Dispatch Coordinator (Student Living)"
-    assert plan.booking_message == "Booked plumber for Friday 14:00-16:00"
 
 
 def test_visit_plan_projection_flags_dispatch_without_booked_visit() -> None:
@@ -819,6 +964,7 @@ def test_build_focus_counts_surfaces_response_visit_and_repeat_risk() -> None:
             {
                 "status": "blocked",
                 "pending_signal_at": datetime(2026, 4, 4, 8, 0, tzinfo=timezone.utc),
+                "pending_signal_owner_role": "coordinator",
                 "visit_plan_headline": "Access arrangement is not ready for the next visit",
                 "operational_history_open_job_count": 2,
             },
@@ -826,6 +972,18 @@ def test_build_focus_counts_surfaces_response_visit_and_repeat_risk() -> None:
                 "status": "triaged",
                 "pending_signal_at": None,
                 "visit_plan_headline": "Attendance still needs a booked visit",
+                "operational_history_open_job_count": 0,
+            },
+            {
+                "status": "triaged",
+                "pending_signal_at": None,
+                "visit_plan_headline": "Dispatch recorded but attendance still needs a booked visit",
+                "operational_history_open_job_count": 0,
+            },
+            {
+                "status": "scheduled",
+                "pending_signal_at": None,
+                "visit_plan_headline": "Visit is booked but no dispatch target is recorded",
                 "operational_history_open_job_count": 0,
             },
             {
@@ -840,10 +998,83 @@ def test_build_focus_counts_surfaces_response_visit_and_repeat_risk() -> None:
     assert counts == {
         "response_needed": 1,
         "state_gap": 0,
-        "visit_attention": 2,
+        "visit_attention": 4,
         "repeat_open_work": 2,
         "blocked": 1,
     }
+
+
+def test_build_focus_counts_limits_response_needed_to_the_viewing_role() -> None:
+    jobs = [
+        {
+            "status": "scheduled",
+            "pending_signal_at": datetime(2026, 4, 4, 9, 0, tzinfo=timezone.utc),
+            "pending_signal_owner_role": "coordinator",
+            "visit_plan_headline": "Resident access note is newer than the booked visit",
+            "operational_history_open_job_count": 0,
+        },
+        {
+            "status": "completed",
+            "pending_signal_at": datetime(2026, 4, 4, 10, 0, tzinfo=timezone.utc),
+            "pending_signal_owner_role": "resident",
+            "visit_plan_headline": "Current visit plan is recorded",
+            "operational_history_open_job_count": 0,
+        },
+    ]
+
+    coordinator_counts = build_focus_counts(jobs, user=StubActor(role=UserRole.coordinator))
+    resident_counts = build_focus_counts(jobs, user=StubActor(role=UserRole.resident))
+    contractor_counts = build_focus_counts(jobs, user=StubActor(role=UserRole.contractor))
+
+    assert coordinator_counts["response_needed"] == 1
+    assert resident_counts["response_needed"] == 1
+    assert contractor_counts["response_needed"] == 0
+
+
+def test_derive_viewer_guidance_translates_operations_owned_next_step_for_resident() -> None:
+    guidance = derive_viewer_guidance(
+        {
+            "status": "scheduled",
+            "coordination_owner_label": "Dispatch coordinator",
+            "visit_plan_summary": "Apply the resident access change to the booking before the next attendance.",
+            "pending_signal_at": datetime(2026, 4, 4, 9, 0, tzinfo=timezone.utc),
+            "pending_signal_owner_role": "coordinator",
+        },
+        user=StubActor(role=UserRole.resident),
+    )
+
+    assert guidance.headline == "Dispatch coordinator is carrying the next step"
+    assert guidance.summary == "Apply the resident access change to the booking before the next attendance."
+
+
+def test_derive_viewer_guidance_keeps_scheduled_contractor_focused_on_shared_booking() -> None:
+    guidance = derive_viewer_guidance(
+        {
+            "status": "scheduled",
+            "visit_plan_summary": "Use the booked window and latest access note as the working attendance plan.",
+            "pending_signal_at": None,
+        },
+        user=StubActor(role=UserRole.contractor),
+    )
+
+    assert guidance.headline == "Use the shared booking before attending site"
+    assert guidance.summary == "Use the booked window and latest access note as the working attendance plan."
+
+
+def test_derive_viewer_guidance_tells_operations_completed_work_is_waiting_on_resident_truth_signal() -> None:
+    guidance = derive_viewer_guidance(
+        {
+            "status": "completed",
+            "responsibility_owner": "resident",
+            "pending_signal_at": None,
+        },
+        user=StubActor(role=UserRole.triage_officer),
+    )
+
+    assert guidance.headline == "Resident confirmation is the next outcome signal"
+    assert guidance.summary == (
+        "Wait for the resident confirmation, recurrence, or charge response before treating the job as fully closed."
+    )
 
 
 def test_derive_queue_priority_prefers_blocked_and_response_signals_over_generic_recency() -> None:
@@ -879,6 +1110,79 @@ def test_derive_queue_priority_prefers_blocked_and_response_signals_over_generic
     assert blocked_priority.rank < response_priority.rank < repeat_priority.rank
     assert response_priority.summary == "Resident access detail needs operations follow-through"
     assert repeat_priority.label == "Repeat work still open"
+
+
+def test_derive_queue_priority_only_marks_response_as_owned_for_the_target_role() -> None:
+    job = {
+        "status": "scheduled",
+        "pending_signal_at": datetime(2026, 4, 4, 9, 0, tzinfo=timezone.utc),
+        "pending_signal_owner_role": "coordinator",
+        "pending_signal_headline": "Resident access detail needs operations follow-through",
+        "visit_plan_headline": "Resident access note is newer than the booked visit",
+        "operational_history_open_job_count": 0,
+    }
+
+    coordinator_priority = derive_queue_priority(job, user=StubActor(role=UserRole.coordinator))
+    resident_priority = derive_queue_priority(job, user=StubActor(role=UserRole.resident))
+
+    assert coordinator_priority.label == "Waiting on response"
+    assert resident_priority.label == "Visit plan at risk"
+    assert resident_priority.summary == "Resident access note is newer than the booked visit"
+
+
+def test_derive_queue_priority_treats_missing_booking_and_missing_dispatch_as_visit_attention() -> None:
+    missing_booking_priority = derive_queue_priority(
+        {
+            "status": "triaged",
+            "pending_signal_at": None,
+            "visit_plan_headline": "Dispatch recorded but attendance still needs a booked visit",
+            "operational_history_open_job_count": 0,
+        }
+    )
+    missing_dispatch_priority = derive_queue_priority(
+        {
+            "status": "scheduled",
+            "pending_signal_at": None,
+            "visit_plan_headline": "Visit is booked but no dispatch target is recorded",
+            "operational_history_open_job_count": 0,
+        }
+    )
+    missing_ack_priority = derive_queue_priority(
+        {
+            "status": "scheduled",
+            "pending_signal_at": None,
+            "visit_plan_headline": "Booked visit is waiting on contractor acknowledgement",
+            "operational_history_open_job_count": 0,
+        }
+    )
+
+    assert missing_booking_priority.label == "Visit plan at risk"
+    assert missing_booking_priority.summary == "Dispatch recorded but attendance still needs a booked visit"
+    assert missing_booking_priority.rank == 2
+
+    assert missing_dispatch_priority.label == "Visit plan at risk"
+    assert missing_dispatch_priority.summary == "Visit is booked but no dispatch target is recorded"
+    assert missing_dispatch_priority.rank == 2
+
+    assert missing_ack_priority.label == "Visit plan at risk"
+    assert missing_ack_priority.summary == "Booked visit is waiting on contractor acknowledgement"
+    assert missing_ack_priority.rank == 2
+
+
+def test_derive_queue_priority_prefers_repeat_open_work_over_generic_unplanned_attendance() -> None:
+    priority = derive_queue_priority(
+        {
+            "status": "new",
+            "pending_signal_at": None,
+            "visit_plan_headline": "Attendance planning not recorded yet",
+            "operational_history_open_job_count": 2,
+            "operational_history_headline": "Repeat issue risk on this asset",
+        }
+    )
+
+    assert priority.label == "Repeat work still open"
+    assert priority.summary == "Repeat issue risk on this asset"
+    assert priority.rank == 3
 
 
 def test_sort_jobs_for_queue_puts_response_and_repeat_risk_ahead_of_recent_activity() -> None:
@@ -957,6 +1261,140 @@ def test_coordination_projection_treats_resident_resolution_confirmation_as_trut
     assert projection.owner_label == "Resident"
 
 
+def test_coordination_projection_treats_charge_notice_as_resident_accountability_signal() -> None:
+    student_living = type("Org", (), {"name": "Student Living"})()
+    triage = type(
+        "Actor",
+        (),
+        {"role": UserRole.triage_officer, "name": "Priya Property Manager", "organisation": student_living},
+    )()
+    completion_event = StubEvent(
+        id=uuid.uuid4(),
+        created_at=datetime(2026, 4, 4, 9, 0, tzinfo=timezone.utc),
+        target_status=JobStatus.completed,
+        event_type=EventType.completion,
+        message="Replaced the damaged mixer and confirmed the shower was watertight on departure.",
+        responsibility_stage=ResponsibilityStage.execution,
+    )
+    notice_event = StubEvent(
+        id=uuid.uuid4(),
+        created_at=datetime(2026, 4, 4, 11, 0, tzinfo=timezone.utc),
+        target_status=None,
+        event_type=EventType.note,
+        message="Recorded the resident-liable damage outcome and issued the charge notice through the portal.",
+        reason_code="charge_notice_issued",
+        responsibility_stage=ResponsibilityStage.coordination,
+        responsibility_owner=ResponsibilityOwner.resident,
+    )
+    notice_event.actor_user = triage
+    job = StubJob(status=JobStatus.completed, events=[completion_event, notice_event])
+
+    projection = derive_coordination_projection(job, job.events)
+    signal = derive_pending_signal(job, job.events)
+
+    assert projection.status == JobStatus.completed
+    assert projection.headline == "Post-visit charge notice recorded"
+    assert projection.detail == "Recorded the resident-liable damage outcome and issued the charge notice through the portal."
+    assert projection.owner_label == "Resident"
+    assert signal is not None
+    assert signal.headline == "Post-visit charge notice needs resident review"
+    assert signal.owner_role == "resident"
+    assert signal.owner_label == "Resident"
+
+
+def test_coordination_projection_treats_resident_charge_appeal_as_operations_signal() -> None:
+    student_living = type("Org", (), {"name": "Student Living"})()
+    resident = type(
+        "Actor",
+        (),
+        {"role": UserRole.resident, "name": "Riley Resident", "organisation": student_living},
+    )()
+    triage = type(
+        "Actor",
+        (),
+        {"role": UserRole.triage_officer, "name": "Priya Property Manager", "organisation": student_living},
+    )()
+    completion_event = StubEvent(
+        id=uuid.uuid4(),
+        created_at=datetime(2026, 4, 4, 9, 0, tzinfo=timezone.utc),
+        target_status=JobStatus.completed,
+        event_type=EventType.completion,
+        message="Replaced the damaged mixer and confirmed the shower was watertight on departure.",
+        responsibility_stage=ResponsibilityStage.execution,
+    )
+    notice_event = StubEvent(
+        id=uuid.uuid4(),
+        created_at=datetime(2026, 4, 4, 10, 0, tzinfo=timezone.utc),
+        target_status=None,
+        event_type=EventType.note,
+        message="Recorded the resident-liable damage outcome and issued the charge notice through the portal.",
+        reason_code="charge_notice_issued",
+        responsibility_stage=ResponsibilityStage.coordination,
+        responsibility_owner=ResponsibilityOwner.resident,
+    )
+    notice_event.actor_user = triage
+    appeal_event = StubEvent(
+        id=uuid.uuid4(),
+        created_at=datetime(2026, 4, 4, 11, 0, tzinfo=timezone.utc),
+        target_status=None,
+        event_type=EventType.note,
+        message="I dispute the charge because the mixer failed again after the first contractor visit.",
+        reason_code="charge_appeal_submitted",
+        responsibility_stage=ResponsibilityStage.triage,
+        responsibility_owner=ResponsibilityOwner.triage_officer,
+    )
+    appeal_event.actor_user = resident
+    job = StubJob(status=JobStatus.completed, events=[completion_event, notice_event, appeal_event])
+
+    projection = derive_coordination_projection(job, job.events)
+    signal = derive_pending_signal(job, job.events)
+
+    assert projection.status == JobStatus.completed
+    assert projection.headline == "Resident disputed the post-visit charge"
+    assert projection.detail == "I dispute the charge because the mixer failed again after the first contractor visit."
+    assert projection.owner_label == "Property manager"
+    assert signal is not None
+    assert signal.headline == "Resident disputed the post-visit charge"
+    assert signal.owner_role == "triage_officer"
+    assert signal.owner_label == "Property manager"
+
+
+def test_coordination_projection_labels_after_hours_handoff_signal_explicitly() -> None:
+    student_living = type("Org", (), {"name": "Student Living"})()
+    reception = type(
+        "Actor",
+        (),
+        {"role": UserRole.reception_admin, "name": "Fran Front Desk", "organisation": student_living},
+    )()
+    report_event = StubEvent(
+        id=uuid.uuid4(),
+        created_at=datetime(2026, 4, 4, 9, 0, tzinfo=timezone.utc),
+        target_status=JobStatus.new,
+        event_type=EventType.report_created,
+        message="Resident reported a leaking sink through the after-hours line.",
+        responsibility_stage=ResponsibilityStage.reception,
+    )
+    handoff_event = StubEvent(
+        id=uuid.uuid4(),
+        created_at=datetime(2026, 4, 4, 10, 0, tzinfo=timezone.utc),
+        target_status=None,
+        event_type=EventType.note,
+        message="Daytime Student Living services acknowledged the overnight handoff and queued the first callback.",
+        reason_code="after_hours_handoff_received",
+        responsibility_stage=ResponsibilityStage.reception,
+        responsibility_owner=ResponsibilityOwner.reception_admin,
+    )
+    handoff_event.actor_user = reception
+    job = StubJob(status=JobStatus.new, events=[report_event, handoff_event])
+
+    projection = derive_coordination_projection(job, job.events)
+
+    assert projection.status == JobStatus.new
+    assert projection.headline == "After-hours handoff received for daytime follow-through"
+    assert projection.detail == "Daytime Student Living services acknowledged the overnight handoff and queued the first callback."
+    assert projection.owner_label == "Front desk"
+
+
 def test_latest_role_update_prefers_event_snapshots_when_live_actor_labels_drift() -> None:
     renamed_org = type("Org", (), {"name": "Renamed Student Living"})()
     renamed_actor = type(
@@ -1029,6 +1467,8 @@ def test_pending_signal_uses_snapshot_backed_actor_label_after_live_rename_drift
     assert signal is not None
     assert signal.actor_label == "Riley Resident (Student Living)"
     assert signal.actor_role == "resident"
+    assert signal.owner_role == "coordinator"
+    assert signal.owner_label == "Dispatch coordinator"
 
 
 def test_visit_plan_uses_snapshot_backed_resident_role_when_live_actor_relation_is_missing() -> None:

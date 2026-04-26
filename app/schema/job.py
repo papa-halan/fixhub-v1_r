@@ -78,6 +78,8 @@ class JobRead(SchemaModel):
     coordination_headline: str
     coordination_owner_label: str
     coordination_detail: str | None = None
+    viewer_guidance_headline: str | None = None
+    viewer_guidance_summary: str | None = None
     action_required_by: str | None = None
     action_required_summary: str | None = None
     responsibility_stage: ResponsibilityStage | None = None
@@ -115,6 +117,8 @@ class JobRead(SchemaModel):
     pending_signal_headline: str | None = None
     pending_signal_summary: str | None = None
     pending_signal_actor_label: str | None = None
+    pending_signal_owner_role: ResponsibilityOwner | None = None
+    pending_signal_owner_label: str | None = None
     pending_signal_at: datetime | None = None
     activity_gap_headline: str | None = None
     activity_gap_summary: str | None = None

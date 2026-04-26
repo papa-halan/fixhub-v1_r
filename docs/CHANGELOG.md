@@ -6,6 +6,16 @@
 - Reviewer: `schema-test-automation`
 - Status: `active`
 
+## [0.6.20] - 2026-04-10 15:42:17 +10:00
+
+### Changed
+- extended the existing event `reason_code` spine so note events can default explicit after-hours handoff and post-visit accountability metadata instead of falling back to generic actor-owned notes
+- added a structured resident `charge_appeal_submitted` update path so post-visit charge disputes stay inside the shared timeline rather than becoming untyped follow-up noise
+- refreshed README and assessment docs to describe the new accountability signals without claiming the repo already implements Phase 1 visit or charge entities
+
+### Notes
+- this run kept the current Phase 0.5 job-plus-event model and tightened accountability after completion rather than broadening the domain surface
+
 ## [0.6.19] - 2026-04-07 11:55:00 +11:00
 
 ### Changed

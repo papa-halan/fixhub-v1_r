@@ -19,11 +19,13 @@ from app.models import (
     Organisation,
     OrganisationType,
     ReportChannel,
+    ResponsibilityOwner,
     User,
     UserRole,
 )
 from app.services import (
     OPERATIONS_ROLES,
+    build_location_asset_catalog,
     derive_activity_gap,
     derive_assignment_projection,
     derive_coordination_projection,
@@ -58,6 +60,7 @@ ROLE_HOMES = {
 }
 
 RESOLVED_JOB_STATUSES = {JobStatus.completed, JobStatus.cancelled}
+OPERATIONS_ROLE_VALUES = {role.value for role in OPERATIONS_ROLES}
 
 
 @dataclass(frozen=True)
@@ -74,6 +77,12 @@ class QueuePriorityProjection:
     label: str
     summary: str
     rank: int
+
+
+@dataclass(frozen=True)
+class ViewerGuidanceProjection:
+    headline: str
+    summary: str
 
 
 @dataclass(frozen=True)
@@ -300,7 +309,19 @@ def job_asset_name(job: Job) -> str | None:
     return None
 
 
+def job_created_by_name(job: Job) -> str:
+    snapshot = getattr(job, "created_by_name_snapshot", None)
+    if snapshot:
+        return snapshot
+    if job.creator:
+        return job.creator.name
+    return "User"
+
+
 def job_reported_for_name(job: Job) -> str:
+    snapshot = getattr(job, "reported_for_user_name_snapshot", None)
+    if snapshot:
+        return snapshot
     reported_for_user = getattr(job, "reported_for_user", None)
     if reported_for_user is not None:
         return reported_for_user.name
@@ -354,7 +375,7 @@ def serialize_job(job: Job) -> dict[str, object]:
         "responsibility_stage": projection.responsibility_stage,
         "owner_scope": projection.owner_scope,
         "created_by": job.created_by,
-        "created_by_name": job.creator.name,
+        "created_by_name": job_created_by_name(job),
         "reported_for_user_id": job.reported_for_user_id,
         "reported_for_user_name": job_reported_for_name(job),
         "intake_channel": intake.channel,
@@ -402,6 +423,8 @@ def serialize_job(job: Job) -> dict[str, object]:
         "pending_signal_headline": pending_signal.headline if pending_signal is not None else None,
         "pending_signal_summary": pending_signal.summary if pending_signal is not None else None,
         "pending_signal_actor_label": pending_signal.actor_label if pending_signal is not None else None,
+        "pending_signal_owner_role": pending_signal.owner_role if pending_signal is not None else None,
+        "pending_signal_owner_label": pending_signal.owner_label if pending_signal is not None else None,
         "pending_signal_at": pending_signal.created_at if pending_signal is not None else None,
         "activity_gap_headline": activity_gap.headline if activity_gap is not None else None,
         "activity_gap_summary": activity_gap.summary if activity_gap is not None else None,
@@ -454,12 +477,19 @@ def serialize_job_for_user(
             "operational_history_open_job_count": history.open_job_count,
         }
     )
-    queue_priority = derive_queue_priority(payload)
+    queue_priority = derive_queue_priority(payload, user=user)
     payload.update(
         {
             "queue_priority_label": queue_priority.label,
             "queue_priority_summary": queue_priority.summary,
             "queue_priority_rank": queue_priority.rank,
+        }
+    )
+    viewer_guidance = derive_viewer_guidance(payload, user=user)
+    payload.update(
+        {
+            "viewer_guidance_headline": viewer_guidance.headline,
+            "viewer_guidance_summary": viewer_guidance.summary,
         }
     )
     return payload
@@ -541,14 +571,31 @@ def build_job_counts(jobs: list[dict[str, object]]) -> dict[str, int]:
 VISIT_PLAN_ATTENTION_HEADLINES = {
     "Attendance planning not recorded yet",
     "Attendance still needs a booked visit",
+    "Dispatch recorded but attendance still needs a booked visit",
+    "Visit is booked but no dispatch target is recorded",
+    "Booked visit is waiting on contractor acknowledgement",
     "Access arrangement is not ready for the next visit",
     "Resident access note is newer than the booked visit",
 }
 
 
-def build_focus_counts(jobs: list[dict[str, object]]) -> dict[str, int]:
+def pending_signal_targets_user(job: dict[str, object], user: User | None = None) -> bool:
+    if job.get("pending_signal_at") is None:
+        return False
+
+    owner_role = str(job.get("pending_signal_owner_role") or "")
+    if user is None or not owner_role:
+        return True
+    if user.role == UserRole.admin:
+        return owner_role in OPERATIONS_ROLE_VALUES
+    if user.role in OPERATIONS_ROLES:
+        return owner_role == user.role.value
+    return owner_role == user.role.value
+
+
+def build_focus_counts(jobs: list[dict[str, object]], *, user: User | None = None) -> dict[str, int]:
     return {
-        "response_needed": len([job for job in jobs if job.get("pending_signal_at") is not None]),
+        "response_needed": len([job for job in jobs if pending_signal_targets_user(job, user)]),
         "state_gap": len([job for job in jobs if job.get("activity_gap_at") is not None]),
         "visit_attention": len(
             [
@@ -568,30 +615,191 @@ def build_focus_counts(jobs: list[dict[str, object]]) -> dict[str, int]:
     }
 
 
-def derive_queue_priority(job: dict[str, object]) -> QueuePriorityProjection:
+def _first_non_blank(*values: object) -> str | None:
+    for value in values:
+        if isinstance(value, str):
+            stripped = value.strip()
+            if stripped:
+                return stripped
+    return None
+
+
+def derive_viewer_guidance(
+    job: dict[str, object],
+    *,
+    user: User,
+) -> ViewerGuidanceProjection:
+    status = str(job.get("status") or "")
+    action_required_summary = _first_non_blank(job.get("action_required_summary"))
+    pending_signal_summary = _first_non_blank(job.get("pending_signal_summary"))
+    visit_plan_summary = _first_non_blank(job.get("visit_plan_summary"))
+    coordination_detail = _first_non_blank(job.get("coordination_detail"))
+    operational_history_summary = _first_non_blank(job.get("operational_history_summary"))
+    coordination_owner_label = _first_non_blank(job.get("coordination_owner_label")) or "the shared timeline"
+
+    if pending_signal_targets_user(job, user):
+        if user.role == UserRole.resident:
+            return ViewerGuidanceProjection(
+                headline="Your reply is now part of the shared record",
+                summary=(
+                    pending_signal_summary
+                    or "Read the latest staff or field update and post the resident reply they need in the timeline."
+                ),
+            )
+        if user.role == UserRole.contractor:
+            return ViewerGuidanceProjection(
+                headline="Your field follow-through is the next live handoff",
+                summary=(
+                    pending_signal_summary
+                    or "Read the latest resident or operations note before attending site or posting progress."
+                ),
+            )
+        return ViewerGuidanceProjection(
+            headline="You carry the next coordination move",
+            summary=(
+                pending_signal_summary
+                or action_required_summary
+                or "Use the newest shared update before changing booking, dispatch, or workflow state."
+            ),
+        )
+
+    if user.role == UserRole.resident:
+        if status == JobStatus.completed.value and job.get("responsibility_owner") == ResponsibilityOwner.resident.value:
+            return ViewerGuidanceProjection(
+                headline="The next truth signal comes from you",
+                summary=(
+                    action_required_summary
+                    or "Confirm whether the visit resolved the issue, report recurrence, or dispute the charge only if the facts changed."
+                ),
+            )
+        return ViewerGuidanceProjection(
+            headline=f"{coordination_owner_label} is carrying the next step",
+            summary=(
+                visit_plan_summary
+                or action_required_summary
+                or "Watch the shared timeline and only add a resident update if access changes or the issue returns."
+            ),
+        )
+
+    if user.role == UserRole.contractor:
+        if status in {JobStatus.scheduled.value, JobStatus.follow_up_scheduled.value}:
+            return ViewerGuidanceProjection(
+                headline="Use the shared booking before attending site",
+                summary=(
+                    visit_plan_summary
+                    or action_required_summary
+                    or "Check the booked window, access path, and dispatch before travel."
+                ),
+            )
+        if status == JobStatus.in_progress.value:
+            return ViewerGuidanceProjection(
+                headline="Keep field progress flowing back through FixHub",
+                summary=(
+                    action_required_summary
+                    or "Record what changed on site so staff and residents can work from the same update."
+                ),
+            )
+        if status == JobStatus.blocked.value:
+            return ViewerGuidanceProjection(
+                headline="Keep the blocker explicit so rebooking stays credible",
+                summary=(
+                    action_required_summary
+                    or pending_signal_summary
+                    or "Record the access, parts, or approval issue clearly enough for operations to rebook the visit."
+                ),
+            )
+        return ViewerGuidanceProjection(
+            headline="Use the timeline as the contractor handoff record",
+            summary=(
+                action_required_summary
+                or coordination_detail
+                or "Post any new site outcome here rather than relying on side channels."
+            ),
+        )
+
+    if status == JobStatus.completed.value and job.get("responsibility_owner") == ResponsibilityOwner.resident.value:
+        return ViewerGuidanceProjection(
+            headline="Resident confirmation is the next outcome signal",
+            summary=(
+                "Wait for the resident confirmation, recurrence, or charge response before treating the job as fully closed."
+            ),
+        )
+    if status == JobStatus.blocked.value:
+        return ViewerGuidanceProjection(
+            headline="Blocked work needs an operations decision",
+            summary=(
+                action_required_summary
+                or visit_plan_summary
+                or "Resolve the blocker with the resident or contractor before treating the visit as live again."
+            ),
+        )
+    if str(job.get("visit_plan_headline") or "") in VISIT_PLAN_ATTENTION_HEADLINES:
+        return ViewerGuidanceProjection(
+            headline="The visit plan still needs operations follow-through",
+            summary=(
+                visit_plan_summary
+                or action_required_summary
+                or "Tighten the booking, access path, or dispatch so the next attendance is credible."
+            ),
+        )
+    if int(job.get("operational_history_open_job_count") or 0) > 0:
+        return ViewerGuidanceProjection(
+            headline="Nearby repeat-work history should shape the next move",
+            summary=(
+                operational_history_summary
+                or "Check related open work at this location before dispatching or closing this record."
+            ),
+        )
+    return ViewerGuidanceProjection(
+        headline="Keep the next coordination handoff explicit",
+        summary=(
+            action_required_summary
+            or coordination_detail
+            or "Use the shared timeline for the next resident, dispatch, or field instruction."
+        ),
+    )
+
+
+def derive_queue_priority(
+    job: dict[str, object],
+    *,
+    user: User | None = None,
+) -> QueuePriorityProjection:
+    visit_plan_headline = str(job.get("visit_plan_headline") or "")
+    repeat_open_work = int(job.get("operational_history_open_job_count") or 0)
+
     if job.get("status") == JobStatus.blocked.value:
         return QueuePriorityProjection(
             label="Blocked coordination",
             summary="Site work is blocked and needs a rebooking, access fix, or escalation path.",
             rank=BLOCKED_QUEUE_PRIORITY_RANK,
         )
-    if job.get("pending_signal_at") is not None:
+    if pending_signal_targets_user(job, user):
         return QueuePriorityProjection(
             label="Waiting on response",
             summary=str(job.get("pending_signal_headline") or "A newer coordination signal needs follow-through."),
             rank=RESPONSE_NEEDED_QUEUE_PRIORITY_RANK,
         )
-    if job.get("visit_plan_headline") in VISIT_PLAN_ATTENTION_HEADLINES:
+    if (
+        visit_plan_headline in VISIT_PLAN_ATTENTION_HEADLINES
+        and visit_plan_headline != "Attendance planning not recorded yet"
+    ):
         return QueuePriorityProjection(
             label="Visit plan at risk",
-            summary=str(job.get("visit_plan_headline") or "Attendance planning is incomplete."),
+            summary=visit_plan_headline or "Attendance planning is incomplete.",
             rank=VISIT_ATTENTION_QUEUE_PRIORITY_RANK,
         )
-    if int(job.get("operational_history_open_job_count") or 0) > 0:
+    if repeat_open_work > 0:
         return QueuePriorityProjection(
             label="Repeat work still open",
             summary=str(job.get("operational_history_headline") or "Related work at this location is still open."),
             rank=REPEAT_OPEN_QUEUE_PRIORITY_RANK,
+        )
+    if visit_plan_headline in VISIT_PLAN_ATTENTION_HEADLINES:
+        return QueuePriorityProjection(
+            label="Visit plan at risk",
+            summary=visit_plan_headline or "Attendance planning is incomplete.",
+            rank=VISIT_ATTENTION_QUEUE_PRIORITY_RANK,
         )
     if job.get("activity_gap_at") is not None:
         return QueuePriorityProjection(
@@ -809,7 +1017,9 @@ def location_parent_id(job: Job) -> uuid.UUID | None:
 
 
 def jobs_share_location_context(candidate: Job, *, current_job: Job) -> bool:
-    if candidate.location_id == current_job.location_id:
+    candidate_location_id = getattr(candidate, "location_id", None)
+    current_location_id = getattr(current_job, "location_id", None)
+    if candidate_location_id is not None and candidate_location_id == current_location_id:
         return True
 
     current_parent_id = location_parent_id(current_job)
@@ -821,9 +1031,13 @@ def jobs_share_location_context(candidate: Job, *, current_job: Job) -> bool:
 
 
 def related_job_match_label(job: Job, *, current_job: Job) -> str:
-    if current_job.asset_id is not None and job.asset_id == current_job.asset_id:
+    current_asset_id = getattr(current_job, "asset_id", None)
+    job_asset_id = getattr(job, "asset_id", None)
+    current_location_id = getattr(current_job, "location_id", None)
+    job_location_id = getattr(job, "location_id", None)
+    if current_asset_id is not None and job_asset_id == current_asset_id:
         return "Same asset"
-    if job.location_id == current_job.location_id:
+    if job_location_id is not None and job_location_id == current_location_id:
         return "Same location"
     if jobs_share_location_context(job, current_job=current_job):
         return "Same parent area"
@@ -832,9 +1046,13 @@ def related_job_match_label(job: Job, *, current_job: Job) -> str:
 
 def related_job_sort_key(job: Job, *, current_job: Job) -> tuple[bool, bool, datetime, datetime, uuid.UUID]:
     activity_sort = job_activity_sort_key(job)
+    current_asset_id = getattr(current_job, "asset_id", None)
+    job_asset_id = getattr(job, "asset_id", None)
+    current_location_id = getattr(current_job, "location_id", None)
+    job_location_id = getattr(job, "location_id", None)
     return (
-        current_job.asset_id is not None and job.asset_id == current_job.asset_id,
-        job.location_id == current_job.location_id,
+        current_asset_id is not None and job_asset_id == current_asset_id,
+        job_location_id is not None and job_location_id == current_location_id,
         activity_sort[0],
         activity_sort[1],
         activity_sort[2],
@@ -1024,9 +1242,16 @@ def list_contractor_users(session: Session, *, include_demo: bool) -> list[dict[
     ]
 
 
-def list_resident_users(session: Session, *, organisation_id, include_demo: bool) -> list[dict[str, object]]:
+def list_resident_users(
+    session: Session,
+    *,
+    organisation_id,
+    include_demo: bool,
+    include_location_scope: bool = False,
+) -> list[dict[str, object]]:
     stmt = (
         select(User)
+        .options(joinedload(User.home_location))
         .where(
             User.role == UserRole.resident,
             User.organisation_id == organisation_id,
@@ -1035,11 +1260,18 @@ def list_resident_users(session: Session, *, organisation_id, include_demo: bool
     )
     if not include_demo:
         stmt = stmt.where(User.is_demo_account.is_(False))
-    return [
-        {
-            "id": user.id,
+    residents = list(session.scalars(stmt))
+    payload: list[dict[str, object]] = []
+    for user in residents:
+        resident_payload: dict[str, object] = {
+            "id": str(user.id),
             "name": user.name,
             "email": user.email,
         }
-        for user in session.scalars(stmt)
-    ]
+        if include_location_scope:
+            resident_payload["home_location_label"] = (
+                location_label(user.home_location) if user.home_location is not None else None
+            )
+            resident_payload["location_catalog"] = build_location_asset_catalog(session, user=user)
+        payload.append(resident_payload)
+    return payload

@@ -81,6 +81,7 @@ class ResidentUpdateReason(str, Enum):
     issue_still_present = "issue_still_present"
     resident_reported_recurrence = "resident_reported_recurrence"
     resident_confirmed_resolved = "resident_confirmed_resolved"
+    charge_appeal_submitted = "charge_appeal_submitted"
 
 
 class ReportChannel(str, Enum):

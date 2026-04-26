@@ -8,6 +8,7 @@ from app.services.catalog import (
     reportable_locations_for_user,
 )
 from app.services.demo import ensure_demo_data, is_demo_user_email, list_demo_users
+from app.services.manual_seed import MinimalSeedConfig, MinimalSeedSummary, ensure_minimal_seed_data
 from app.services.passwords import hash_password, verify_password
 from app.services.projections import (
     derive_activity_gap,
@@ -26,6 +27,7 @@ from app.services.workflow import (
     COORDINATION_ROLES,
     DEFAULT_STAGE_BY_STATUS,
     EVENT_TYPE_BY_STATUS,
+    MESSAGE_REQUIRED_STATUSES,
     OPERATIONS_ROLES,
     REASON_REQUIRED_STATUSES,
     ROLE_GROUPS_BY_TARGET,
@@ -62,6 +64,7 @@ __all__ = [
     "COORDINATION_ROLES",
     "DEFAULT_STAGE_BY_STATUS",
     "EVENT_TYPE_BY_STATUS",
+    "MESSAGE_REQUIRED_STATUSES",
     "EventSpec",
     "OPERATIONS_ROLES",
     "REASON_REQUIRED_STATUSES",
@@ -97,6 +100,9 @@ __all__ = [
     "location_label",
     "latest_role_update",
     "reportable_locations_for_user",
+    "MinimalSeedConfig",
+    "MinimalSeedSummary",
+    "ensure_minimal_seed_data",
     "sync_job_assignment_from_events",
     "require_status_permission",
     "role_label",

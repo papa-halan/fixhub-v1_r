@@ -31,10 +31,16 @@
           <span>Next owner</span>
           <strong>{{ job.coordination_owner_label }}</strong>
         </div>
-        {% if job.action_required_summary %}
+        {% if job.viewer_guidance_headline %}
         <div class="meta-item">
-          <span>Action needed now</span>
-          <strong>{{ job.action_required_summary }}</strong>
+          <span>What FixHub expects from you</span>
+          <strong>{{ job.viewer_guidance_headline }}</strong>
+        </div>
+        {% endif %}
+        {% if job.viewer_guidance_summary %}
+        <div class="meta-item">
+          <span>Why</span>
+          <strong>{{ job.viewer_guidance_summary }}</strong>
         </div>
         {% endif %}
         {% if job.coordination_detail %}
@@ -157,6 +163,12 @@
           <span>Newest unresolved update</span>
           <strong>{{ job.pending_signal_actor_label }} at {{ job.pending_signal_at|timestamp }}</strong>
         </div>
+        {% if job.pending_signal_owner_label %}
+        <div class="meta-item">
+          <span>Response owed by</span>
+          <strong>{{ job.pending_signal_owner_label }}</strong>
+        </div>
+        {% endif %}
         <div class="meta-item">
           <span>What to do with it</span>
           <strong>{{ job.pending_signal_summary }}</strong>

@@ -1,6 +1,6 @@
 # Documentation Index
 
-Last updated: `2026-04-07 11:55:00 +11:00`
+Last updated: `2026-04-10 15:42:17 +10:00`
 
 ## Document Metadata
 
@@ -25,8 +25,8 @@ This folder stores implementation-aligned notes for the current FixHub residence
 
 ## Current Documentation Focus
 
-- README documents the migrations-first boot flow, signed-session auth, explicit demo vs normal startup, the seeded demo login roster, and the current org/location/job/event model including the split between intake actor and reported resident, event-level assignment snapshots, snapshot-backed current dispatch labels, snapshot-backed actor labels inside coordination summaries, stored location snapshots, lifecycle-aware resident update rules, and the correction that scheduled visits can stay credibly organisation-dispatched without a named technician
-- the schema assessment records the corrected Phase 0.5 foundation: structured locations, same-org validation, resident-facing hierarchy labels, real login in normal mode, explicit demo gating, current workflow guards, stronger structured responsibility history, accountable direct dispatch, truthful pre-attendance operations ownership, and current-vs-historical contractor visibility
+- README documents the migrations-first boot flow, signed-session auth, explicit demo vs normal startup, the seeded demo login roster, and the current org/location/job/event model including the split between intake actor and reported resident, event-level assignment snapshots, snapshot-backed current dispatch labels, snapshot-backed actor labels inside coordination summaries, stored location snapshots, lifecycle-aware resident update rules, post-visit charge-appeal handling, and the correction that scheduled visits can stay credibly organisation-dispatched without a named technician
+- the schema assessment records the corrected Phase 0.5 foundation: structured locations, same-org validation, resident-facing hierarchy labels, real login in normal mode, explicit demo gating, current workflow guards, stronger structured responsibility history, accountable direct dispatch, truthful pre-attendance operations ownership, current-vs-historical contractor visibility, and the note-level reason codes now used for after-hours handoff plus post-visit accountability records
 - the handoff context file captures the latest strategic planning, digital-twin positioning, roadmap, and GitHub backlog work
 - the UoN Student Living maintenance context log captures current real-world actor and workflow evidence so future FixHub modeling stays grounded in the university's actual operating process
 - architecture notes show how residents, operations roles, and contractors share the same timeline

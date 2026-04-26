@@ -18,14 +18,15 @@ from app.models import (
     Organisation,
     OrganisationType,
     ReportChannel,
+    ResponsibilityOwner,
     ResponsibilityStage,
     User,
     UserRole,
 )
 from app.services.catalog import location_label
 from app.services.passwords import hash_password, verify_password
-from app.services.projections import sync_job_status_from_events
-from app.services.workflow import append_event
+from app.services.projections import sync_job_assignment_from_events, sync_job_status_from_events
+from app.services.workflow import append_event, assignee_scope
 
 
 @dataclass(frozen=True)
@@ -225,6 +226,11 @@ DEMO_ASSETS: tuple[DemoAsset, ...] = (
 
 
 DEMO_USER_EMAILS = {demo.email for demo in DEMO_USERS}
+ASSIGNMENT_ENDING_STATUSES = {
+    JobStatus.completed,
+    JobStatus.cancelled,
+    JobStatus.reopened,
+}
 
 DEMO_JOBS: tuple[DemoJob, ...] = (
     DemoJob(
@@ -651,6 +657,23 @@ def _set_job_assignment(
     job.assigned_contractor_user_id = assigned_contractor.id if assigned_contractor is not None else None
 
 
+def _append_assignment_clear_event(*, session: Session, job: Job, actor: User) -> None:
+    if job.assigned_org_id is None and job.assigned_contractor_user_id is None:
+        return
+    append_event(
+        session,
+        job=job,
+        actor=actor,
+        message="Assignment cleared",
+        event_type=EventType.assignment,
+        responsibility_stage=ResponsibilityStage.coordination,
+        owner_scope=assignee_scope(job),
+        responsibility_owner=ResponsibilityOwner.coordinator,
+        assigned_org_id=None,
+        assigned_contractor_user_id=None,
+    )
+
+
 def _report_created_message(seeded_job: DemoJob, reported_for_user: User) -> str:
     if seeded_job.intake_channel == ReportChannel.resident_portal:
         return "Resident reported the issue through the portal."
@@ -704,6 +727,8 @@ def _ensure_demo_jobs(
             status=JobStatus.new,
             created_by=creator.id,
             reported_for_user_id=reported_for_user.id,
+            created_by_name_snapshot=creator.name,
+            reported_for_user_name_snapshot=reported_for_user.name,
         )
         session.add(job)
         session.flush()
@@ -721,6 +746,9 @@ def _ensure_demo_jobs(
         )
 
         for seeded_event in seeded_job.events:
+            actor = users[seeded_event.actor_email]
+            if seeded_event.target_status in ASSIGNMENT_ENDING_STATUSES:
+                _append_assignment_clear_event(session=session, job=job, actor=actor)
             assigned_org_name = seeded_event.assigned_org_name
             if assigned_org_name is None and job.assigned_org is not None:
                 assigned_org_name = job.assigned_org.name
@@ -737,7 +765,7 @@ def _ensure_demo_jobs(
             append_event(
                 session,
                 job=job,
-                actor=users[seeded_event.actor_email],
+                actor=actor,
                 message=seeded_event.message,
                 event_type=seeded_event.event_type,
                 target_status=seeded_event.target_status,
@@ -746,6 +774,7 @@ def _ensure_demo_jobs(
                 owner_scope=seeded_event.owner_scope,
             )
 
+        sync_job_assignment_from_events(job)
         sync_job_status_from_events(job)
         session.flush()
 

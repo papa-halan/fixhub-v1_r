@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Any
 
 from app.models import JobStatus, ResidentUpdateReason
+from app.services.workflow import DEFAULT_RESPONSIBILITY_OWNER_BY_STATUS, DEFAULT_STAGE_BY_STATUS
 
 
 RESIDENT_RECURRENCE_REASON_CODES = {
@@ -14,6 +15,9 @@ RESIDENT_RECURRENCE_REASON_CODES = {
 }
 RESIDENT_RESOLUTION_REASON_CODES = {
     ResidentUpdateReason.resident_confirmed_resolved.value,
+}
+RESIDENT_CHARGE_APPEAL_REASON_CODES = {
+    ResidentUpdateReason.charge_appeal_submitted.value,
 }
 RESIDENT_ACCESS_REASON_CODES = {
     ResidentUpdateReason.resident_access_update.value,
@@ -60,6 +64,26 @@ GENERIC_STATUS_MESSAGES = {
     JobStatus.reopened.value: "Reopened after prior completion",
     JobStatus.follow_up_scheduled.value: "Follow-up visit recorded",
     JobStatus.escalated.value: "Escalation recorded",
+}
+PRE_ATTENDANCE_COORDINATION_STATUSES = {
+    JobStatus.scheduled,
+    JobStatus.follow_up_scheduled,
+}
+POST_VISIT_ACCOUNTABILITY_STATUSES = {
+    JobStatus.completed,
+    JobStatus.follow_up_scheduled,
+}
+AFTER_HOURS_HANDOFF_REASON_CODES = {
+    "after_hours_handoff_received",
+}
+LIABILITY_REASON_CODES = {
+    "liability_assessed",
+}
+CHARGE_NOTICE_REASON_CODES = {
+    "charge_notice_issued",
+}
+CHARGE_RESOLUTION_REASON_CODES = {
+    "charge_resolved",
 }
 
 
@@ -243,9 +267,23 @@ def latest_coordination_signal(events: Iterable[Any]) -> Any | None:
     return signal_events[-1]
 
 
+def _is_pre_attendance_contractor_assignment_signal(event: Any, status: JobStatus) -> bool:
+    if status not in PRE_ATTENDANCE_COORDINATION_STATUSES:
+        return False
+    if _enum_value(getattr(event, "event_type", None)) != "assignment":
+        return False
+    if getattr(event, "target_status", None) is not None:
+        return False
+    if _event_actor_role_value(event) != "contractor":
+        return False
+    return getattr(event, "assigned_contractor_user_id", None) is not None
+
+
 def coordination_anchor_event(events: Iterable[Any], status: JobStatus) -> Any | None:
     latest_signal = latest_coordination_signal(events)
     if latest_signal is not None and getattr(latest_signal, "target_status", None) is None:
+        if _is_pre_attendance_contractor_assignment_signal(latest_signal, status):
+            return latest_event_for_status(events, status)
         return latest_signal
     return latest_event_for_status(events, status)
 
@@ -284,6 +322,72 @@ def latest_lifecycle_event(events: Iterable[Any], status: JobStatus) -> Any | No
     return None
 
 
+def _reason_code_coordination_summary(event: Any, *, status: JobStatus) -> CoordinationSummary | None:
+    reason_code = getattr(event, "reason_code", None)
+    actor_role = _event_actor_role_value(event)
+    message = getattr(event, "message", None)
+
+    if actor_role == "resident" and reason_code in RESIDENT_ACCESS_REASON_CODES:
+        return CoordinationSummary(
+            headline="Resident sent an access update that operations need to apply",
+            owner_label="Property manager",
+            detail=message,
+            next_step="Apply the resident's access update to the visit plan or contractor handoff.",
+        )
+    if reason_code in AFTER_HOURS_HANDOFF_REASON_CODES:
+        return CoordinationSummary(
+            headline="After-hours handoff received for daytime follow-through",
+            owner_label="Front desk",
+            detail=message,
+            next_step="Review the overnight handoff and record the daytime triage or dispatch decision.",
+        )
+    if status not in POST_VISIT_ACCOUNTABILITY_STATUSES:
+        return None
+    if actor_role == "resident" and reason_code in RESIDENT_RESOLUTION_REASON_CODES:
+        return CoordinationSummary(
+            headline="Resident confirmed the issue is resolved after the visit",
+            owner_label="Resident",
+            detail=message,
+            next_step="No immediate action is required unless the issue returns and needs a new coordination record.",
+        )
+    if actor_role == "resident" and reason_code in RESIDENT_RECURRENCE_REASON_CODES:
+        return CoordinationSummary(
+            headline="Resident says the issue is still active after completion",
+            owner_label="Property manager",
+            detail=message,
+            next_step="Review the recurrence report and decide whether to reopen or schedule follow-up.",
+        )
+    if reason_code in LIABILITY_REASON_CODES:
+        return CoordinationSummary(
+            headline="Post-visit liability review recorded",
+            owner_label="Property manager",
+            detail=message,
+            next_step="Keep the liability outcome in the record and issue a resident-facing notice if charges apply.",
+        )
+    if reason_code in CHARGE_NOTICE_REASON_CODES:
+        return CoordinationSummary(
+            headline="Post-visit charge notice recorded",
+            owner_label="Resident",
+            detail=message,
+            next_step="Review the notice and submit an appeal if the charge is disputed.",
+        )
+    if actor_role == "resident" and reason_code in RESIDENT_CHARGE_APPEAL_REASON_CODES:
+        return CoordinationSummary(
+            headline="Resident disputed the post-visit charge",
+            owner_label="Property manager",
+            detail=message,
+            next_step="Review the appeal and record whether the charge stands, changes, or is removed.",
+        )
+    if reason_code in CHARGE_RESOLUTION_REASON_CODES:
+        return CoordinationSummary(
+            headline="Post-visit charge outcome recorded",
+            owner_label="Operations",
+            detail=message,
+            next_step="Keep the accountability outcome in the record for future reference.",
+        )
+    return None
+
+
 def coordination_summary(job: Any, events: Iterable[Any]) -> CoordinationSummary:
     ordered_events = sorted(events, key=_event_order_key)
     latest_event = latest_meaningful_event(events)
@@ -292,16 +396,13 @@ def coordination_summary(job: Any, events: Iterable[Any]) -> CoordinationSummary
     anchor_event = coordination_anchor_event(ordered_events, status)
     latest_message = getattr(status_event, "message", None) or getattr(latest_event, "message", None)
     latest_reason = getattr(status_event, "reason_code", None)
-    latest_event_reason = getattr(latest_event, "reason_code", None)
-    latest_actor_role_value = _event_actor_role_value(latest_event) if latest_event is not None else None
-
-    if latest_actor_role_value == "resident" and latest_event_reason in RESIDENT_ACCESS_REASON_CODES:
-        return CoordinationSummary(
-            headline="Resident sent an access update that operations need to apply",
-            owner_label="Property manager",
-            detail=getattr(latest_event, "message", None),
-            next_step="Apply the resident's access update to the visit plan or contractor handoff.",
-        )
+    reason_summary = (
+        _reason_code_coordination_summary(anchor_event, status=status)
+        if anchor_event is not None and getattr(anchor_event, "target_status", None) is None
+        else None
+    )
+    if reason_summary is not None:
+        return reason_summary
 
     latest_signal_status = getattr(anchor_event, "target_status", None)
     latest_signal_stage = _enum_value(getattr(anchor_event, "responsibility_stage", None))
@@ -358,7 +459,7 @@ def coordination_summary(job: Any, events: Iterable[Any]) -> CoordinationSummary
     if status == JobStatus.scheduled:
         return CoordinationSummary(
             headline="Visit scheduled; waiting for contractor attendance",
-            owner_label="Contractor",
+            owner_label="Property manager",
             detail=latest_message,
             next_step="Attend the booked window and record whether work started, was blocked, or was completed.",
         )
@@ -386,20 +487,6 @@ def coordination_summary(job: Any, events: Iterable[Any]) -> CoordinationSummary
             next_step="Record the condition needed to bring the job back into triage or scheduling.",
         )
     if status == JobStatus.completed:
-        if latest_actor_role_value == "resident" and latest_event_reason in RESIDENT_RESOLUTION_REASON_CODES:
-            return CoordinationSummary(
-                headline="Resident confirmed the issue is resolved after the visit",
-                owner_label="Resident",
-                detail=getattr(latest_event, "message", None),
-                next_step="No immediate action is required unless the issue returns and needs a new coordination record.",
-            )
-        if latest_actor_role_value == "resident" and latest_event_reason in RESIDENT_RECURRENCE_REASON_CODES:
-            return CoordinationSummary(
-                headline="Resident says the issue is still active after completion",
-                owner_label="Property manager",
-                detail=getattr(latest_event, "message", None),
-                next_step="Review the recurrence report and decide whether to reopen or schedule follow-up.",
-            )
         return CoordinationSummary(
             headline="Work marked complete",
             owner_label="Resident",
@@ -418,7 +505,7 @@ def coordination_summary(job: Any, events: Iterable[Any]) -> CoordinationSummary
         detail = latest_reason or latest_message
         return CoordinationSummary(
             headline="Return visit scheduled after recurrence",
-            owner_label="Contractor",
+            owner_label="Property manager",
             detail=detail,
             next_step="Attend the return visit and record the outcome from site.",
         )
@@ -535,6 +622,8 @@ class PendingSignalProjection:
     summary: str
     actor_label: str
     actor_role: str
+    owner_role: str | None
+    owner_label: str | None
     created_at: datetime
 
 
@@ -581,6 +670,11 @@ def _pending_signal_copy(
                 "Resident confirmed the visit resolved the issue",
                 "Keep the confirmation in the record and only re-open coordination if the issue returns.",
             )
+        if source.reason_code in RESIDENT_CHARGE_APPEAL_REASON_CODES:
+            return (
+                "Resident disputed the post-visit charge",
+                "Review the appeal and record whether the charge stands, changes, or is removed.",
+            )
         if source.reason_code in RESIDENT_ACCESS_REASON_CODES:
             if owner_role == "contractor":
                 return (
@@ -624,6 +718,11 @@ def _pending_signal_copy(
                 "Check the latest booking or scope note before attending site or posting progress.",
             )
         if owner_role == "resident":
+            if source.reason_code in CHARGE_NOTICE_REASON_CODES:
+                return (
+                    "Post-visit charge notice needs resident review",
+                    "Read the notice and record an appeal if the accountability outcome is disputed.",
+                )
             if status == JobStatus.completed:
                 return (
                     "Completion update is waiting on resident confirmation",
@@ -651,6 +750,7 @@ def derive_pending_signal(job: Any, events: Iterable[Any]) -> PendingSignalProje
 
     projection = derive_coordination_projection(job, ordered_events)
     owner_role = projection.responsibility_owner
+    assignment = derive_assignment_projection(job, ordered_events)
     status = projection.status
     latest_resident = latest_role_update(ordered_events, roles={"resident"})
     latest_operations = latest_role_update(
@@ -672,12 +772,18 @@ def derive_pending_signal(job: Any, events: Iterable[Any]) -> PendingSignalProje
     if source.actor_role == "resident" and source.reason_code in RESIDENT_RESOLUTION_REASON_CODES:
         return None
 
+    owner_label = RESPONSIBILITY_OWNER_LABELS.get(owner_role, "Operations")
+    if owner_role == "contractor" and assignment.assignee_label:
+        owner_label = assignment.assignee_label
+
     headline, summary = _pending_signal_copy(owner_role=owner_role, status=status, source=source)
     return PendingSignalProjection(
         headline=headline,
         summary=summary,
         actor_label=source.actor_label,
         actor_role=source.actor_role,
+        owner_role=owner_role,
+        owner_label=owner_label,
         created_at=source.created_at,
     )
 
@@ -746,6 +852,15 @@ def _latest_access_blocker_event(events: Iterable[Any]) -> Any | None:
     return matching[-1]
 
 
+def _latest_post_schedule_contractor_update(events: Iterable[Any], *, schedule_event: Any) -> RoleUpdateProjection | None:
+    ordered_events = sorted(events, key=_event_order_key)
+    schedule_key = _event_order_key(schedule_event)
+    return latest_role_update(
+        [event for event in ordered_events if _event_order_key(event) > schedule_key],
+        roles={"contractor"},
+    )
+
+
 def derive_visit_plan(job: Any, events: Iterable[Any]) -> VisitPlanProjection | None:
     ordered_events = sorted(events, key=_event_order_key)
     if not ordered_events:
@@ -757,6 +872,11 @@ def derive_visit_plan(job: Any, events: Iterable[Any]) -> VisitPlanProjection | 
     schedule_event = _latest_schedule_event(ordered_events)
     access_event = _latest_access_event(ordered_events)
     blocker_event = _latest_access_blocker_event(ordered_events)
+    contractor_update_after_schedule = (
+        _latest_post_schedule_contractor_update(ordered_events, schedule_event=schedule_event)
+        if schedule_event is not None
+        else None
+    )
 
     headline = "Attendance planning not recorded yet"
     summary = "Record the visit window, access path, and who should attend before treating the job as ready."
@@ -773,21 +893,39 @@ def derive_visit_plan(job: Any, events: Iterable[Any]) -> VisitPlanProjection | 
     ):
         headline = "Access arrangement is not ready for the next visit"
         summary = "Resolve keys, resident timing, or site access first, then record the replacement attendance plan."
-    elif schedule_event is not None and assignment.assignee_label is None:
-        headline = "Visit is booked but no dispatch target is recorded"
-        summary = "Record who is actually carrying the visit so resident, staff, and field updates stay credible."
+    elif (
+        schedule_event is not None
+        and access_at is not None
+        and schedule_at is not None
+        and access_at > schedule_at
+    ):
+        headline = "Resident access note is newer than the booked visit"
+        summary = "Apply the resident access change to the booking before the next attendance."
     elif schedule_event is not None:
-        headline = "Current visit plan is recorded"
-        if assignment.assigned_org_id is not None and assignment.assigned_contractor_user_id is None:
-            summary = (
-                "Use the booked window and contractor organisation as the working attendance plan. "
-                "A named field worker can be added later if operations actually know it."
-            )
+        if assignment.assignee_label is None:
+            headline = "Visit is booked but no dispatch target is recorded"
+            summary = "Record who is actually carrying the visit so resident, staff, and field updates stay credible."
+        elif contractor_update_after_schedule is None:
+            headline = "Booked visit is waiting on contractor acknowledgement"
+            if assignment.assigned_contractor_user_id is not None:
+                summary = (
+                    "The visit window is recorded, but the named field worker has not confirmed the booking in the "
+                    "shared timeline yet."
+                )
+            else:
+                summary = (
+                    "The visit window is recorded, but the dispatched contractor organisation has not confirmed the "
+                    "booking in the shared timeline yet."
+                )
         else:
-            summary = "Use the booked window and latest access note as the working attendance plan."
-        if access_at is not None and schedule_at is not None and access_at > schedule_at:
-            headline = "Resident access note is newer than the booked visit"
-            summary = "Apply the resident access change to the booking before the next attendance."
+            headline = "Current visit plan is recorded"
+            if assignment.assigned_org_id is not None and assignment.assigned_contractor_user_id is None:
+                summary = (
+                    "Use the booked window and contractor organisation as the working attendance plan. "
+                    "A named field worker can be added later if operations actually know it."
+                )
+            else:
+                summary = "Use the booked window and latest access note as the working attendance plan."
     elif status in {JobStatus.assigned, JobStatus.triaged, JobStatus.reopened}:
         headline = "Attendance still needs a booked visit"
         summary = "Set the first credible attendance window so resident, staff, and contractor are working from the same plan."
@@ -824,17 +962,24 @@ def derive_coordination_projection(job: Any, events: Iterable[Any]) -> Coordinat
     responsibility_stage = _enum_value(getattr(anchor_event, "responsibility_stage", None))
     owner_scope = _enum_value(getattr(anchor_event, "owner_scope", None))
     responsibility_owner = _enum_value(getattr(anchor_event, "responsibility_owner", None))
+    if responsibility_stage is None and getattr(anchor_event, "target_status", None) is not None:
+        responsibility_stage = _enum_value(DEFAULT_STAGE_BY_STATUS.get(status))
+    if responsibility_owner is None and getattr(anchor_event, "target_status", None) is not None:
+        responsibility_owner = _enum_value(DEFAULT_RESPONSIBILITY_OWNER_BY_STATUS.get(status))
 
     owner_label = summary.owner_label
     if status == JobStatus.in_progress and assignment.assignee_label:
         owner_label = assignment.assignee_label
+    action_required_by = owner_label
+    if status in PRE_ATTENDANCE_COORDINATION_STATUSES:
+        action_required_by = assignment.assignee_label or "Contractor"
 
     return CoordinationProjection(
         status=status,
         headline=summary.headline,
         owner_label=owner_label,
         detail=summary.detail,
-        action_required_by=owner_label,
+        action_required_by=action_required_by,
         action_required_summary=summary.next_step,
         responsibility_stage=responsibility_stage,
         owner_scope=owner_scope,

@@ -58,17 +58,13 @@ STATUS_EVENT_MESSAGES = {
 }
 ASSIGNEE_REQUIRED_STATUSES = {
     JobStatus.assigned,
-    JobStatus.scheduled,
     JobStatus.in_progress,
     JobStatus.blocked,
     JobStatus.completed,
-    JobStatus.follow_up_scheduled,
 }
 ACTIVE_ASSIGNMENT_STATUSES = {
-    JobStatus.scheduled,
     JobStatus.in_progress,
     JobStatus.blocked,
-    JobStatus.follow_up_scheduled,
 }
 REASON_REQUIRED_STATUSES = {
     JobStatus.on_hold,
@@ -378,9 +374,9 @@ def append_event(
     event_type: EventType = EventType.note,
     target_status: JobStatus | None = None,
     reason_code: str | None = None,
-    responsibility_stage: ResponsibilityStage | None = None,
-    owner_scope: OwnerScope | None = None,
-    responsibility_owner: ResponsibilityOwner | None = None,
+    responsibility_stage=UNSET,
+    owner_scope=UNSET,
+    responsibility_owner=UNSET,
     assigned_org_id=UNSET,
     assigned_contractor_user_id=UNSET,
 ) -> Event:
@@ -402,8 +398,15 @@ def append_event(
         assigned_contractor_name_snapshot = getattr(assigned_contractor, "name", None)
     else:
         assigned_contractor_name_snapshot = getattr(assigned_contractor, "name", None)
+    resolved_responsibility_stage = (
+        default_stage_for_actor(actor) if responsibility_stage is UNSET else responsibility_stage
+    )
+    resolved_owner_scope = default_owner_scope(actor, job) if owner_scope is UNSET else owner_scope
+    resolved_responsibility_owner = (
+        default_responsibility_owner(actor) if responsibility_owner is UNSET else responsibility_owner
+    )
     event = Event(
-        job_id=job.id,
+        job=job,
         actor_user_id=actor.id,
         actor_org_id=actor.organisation_id,
         assigned_org_id=job.assigned_org_id if assigned_org_id is UNSET else assigned_org_id,
@@ -425,9 +428,9 @@ def append_event(
         asset_snapshot=job.asset_snapshot,
         message=message,
         reason_code=reason_code,
-        responsibility_stage=responsibility_stage or default_stage_for_actor(actor),
-        owner_scope=owner_scope or default_owner_scope(actor, job),
-        responsibility_owner=responsibility_owner or default_responsibility_owner(actor),
+        responsibility_stage=resolved_responsibility_stage,
+        owner_scope=resolved_owner_scope,
+        responsibility_owner=resolved_responsibility_owner,
         created_at=datetime.now(timezone.utc),
     )
     session.add(event)
@@ -492,7 +495,7 @@ def validate_assignment_clear_requires_explicit_status(
 
 def apply_status_change(
     job: Job,
-    target: JobStatus,
+    target: JobStatus | None,
     actor: User,
     *,
     message: str | None = None,
@@ -501,29 +504,24 @@ def apply_status_change(
     owner_scope: OwnerScope | None = None,
     responsibility_owner: ResponsibilityOwner | None = None,
 ) -> EventSpec | None:
+    if target is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="status is required when requesting a status change",
+        )
+
     require_status_permission(actor, target)
 
     if target == job.status:
-        return None
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"Job is already {target.value}; omit status or choose a different lifecycle move",
+        )
 
     if target not in ALLOWED_STATUS_CHANGES[job.status]:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Cannot move job from {job.status.value} to {target.value}",
-        )
-
-    validate_assignee_required(job, target)
-
-    if target in REASON_REQUIRED_STATUSES and reason_code is None:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=f"reason_code is required when moving a job to {target.value}",
-        )
-
-    if target in MESSAGE_REQUIRED_STATUSES and message is None:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=f"event_message is required when moving a job to {target.value}",
         )
 
     if target == JobStatus.completed and reason_code is None and responsibility_stage is None:

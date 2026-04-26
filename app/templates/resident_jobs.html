@@ -51,8 +51,11 @@
       <p class="muted">Contractor org: {{ job.assigned_org_name or "Waiting for operations" }}</p>
       <p class="muted">Named worker: {{ job.assigned_contractor_name or "Not selected" }}</p>
       <p class="muted">Next owner: {{ job.coordination_owner_label }}</p>
-      {% if job.action_required_summary %}
-      <p class="muted">Action needed now: {{ job.action_required_summary }}</p>
+      {% if job.viewer_guidance_headline %}
+      <p class="muted">For you now: {{ job.viewer_guidance_headline }}</p>
+      {% endif %}
+      {% if job.viewer_guidance_summary %}
+      <p class="muted">{{ job.viewer_guidance_summary }}</p>
       {% endif %}
       {% if job.visit_plan_headline %}
       <p class="muted">Visit plan: {{ job.visit_plan_headline }}</p>
@@ -65,6 +68,9 @@
       {% endif %}
       {% if job.pending_signal_at %}
       <p class="muted">Response-needed signal: {{ job.pending_signal_headline }} from {{ job.pending_signal_actor_label }} at {{ job.pending_signal_at|timestamp }}</p>
+      {% if job.pending_signal_owner_label %}
+      <p class="muted">Response owed by: {{ job.pending_signal_owner_label }}</p>
+      {% endif %}
       <p class="muted">{{ job.pending_signal_summary }}</p>
       {% endif %}
       {% if job.activity_gap_at %}
